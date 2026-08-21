@@ -204,7 +204,7 @@ def main():
     args = parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    workspace_root = script_dir.parents[2]
+    workspace_root = script_dir.parent
     location_dir = workspace_root / "scenario-planning-inputs" / args.location_name
     location_path = location_dir / "location.json"
 

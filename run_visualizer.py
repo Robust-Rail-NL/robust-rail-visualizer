@@ -197,8 +197,8 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
-    inputs_root = args.inputs_root or repo_root.parent / "scenario-planning-inputs"
-    output_dir = args.output_dir or repo_root / "data"
+    inputs_root = args.inputs_root or repo_root / "scenario-planning-inputs"
+    output_dir = args.output_dir or script_dir / "data"
 
     PORT = args.port
     socketserver.TCPServer.allow_reuse_address = True
