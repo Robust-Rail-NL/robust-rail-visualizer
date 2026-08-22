@@ -103,6 +103,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json_bytes({"scenarios": scenarios, "plans": plans}))
             return
+        if self.path == "/functions.js" or self.path == "/api/functions.js":
+            js_path = self.server.script_dir / "functions.js"
+            if js_path.exists():
+                with open(js_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(content.encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
         if self.path == "/api/visualizer-html":
             html_path = self.server.vis_html_path
             if html_path and Path(html_path).exists():
