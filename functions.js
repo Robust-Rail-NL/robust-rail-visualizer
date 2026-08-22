@@ -192,7 +192,7 @@ let _moveAnimCompleted = false;
 let _moveAnimIdx = -1;
 let _moveAnimFinished = false;
 
-function buildMovePath(train, state, prevState) {
+function buildMovePath(train, state, prevState, startAtTail) {
   const trackIds = state.train_path && state.train_path[train];
   if (!trackIds || trackIds.length < 1) return null;
   const srcTrack = prevState && prevState.trains[train] ? prevState.trains[train].track : null;
@@ -212,17 +212,37 @@ function buildMovePath(train, state, prevState) {
     let pts = null;
     if (shape) {
       if (i === 0) {
-        const restSide = (prevState.trains[train] && prevState.trains[train].restSide) || 'b';
-        const ratio = trainRatio(train, tid);
-        const center = restSide === 'a' ? Math.min(ratio / 2, 0.99) : Math.max(1 - ratio / 2, 0.01);
-        const exitSide = edgeSideOf(tid, allTracks[1]);
-        if (exitSide === 'b') {
-          pts = subPolyline(shape, Math.min(center, 0.99), 1);
-        } else if (exitSide === 'a') {
-          pts = subPolyline(shape, 0, Math.max(center, 0.01));
-          if (pts.length >= 2) pts.reverse();
-        } else {
-          pts = restSide === 'a' ? shape.slice() : shape.slice().reverse();
+        // Boundary fraction where the parked train sits: with startAtTail use
+        // the real span from the previous state (works for mid-track parking),
+        // otherwise fall back to the flush-parking centre estimate.
+        let boundary = null;
+        if (startAtTail && prevState && prevState.trains[train]) {
+          const span = trainFractionsOnTrack(train, tid, prevState);
+          if (span) {
+            boundary = span[1];
+            const tailFrac = span[0];
+            const exitSide0 = edgeSideOf(tid, allTracks[1]);
+            if (exitSide0 === 'b') {
+              pts = subPolyline(shape, Math.min(tailFrac, 0.99), 1);
+            } else if (exitSide0 === 'a') {
+              pts = subPolyline(shape, 0, Math.max(boundary, 0.01));
+              if (pts.length >= 2) pts.reverse();
+            }
+          }
+        }
+        if (!pts) {
+          const restSide = (prevState.trains[train] && prevState.trains[train].restSide) || 'b';
+          const ratio = trainRatio(train, tid);
+          const center = restSide === 'a' ? Math.min(ratio / 2, 0.99) : Math.max(1 - ratio / 2, 0.01);
+          const exitSide = edgeSideOf(tid, allTracks[1]);
+          if (exitSide === 'b') {
+            pts = subPolyline(shape, Math.min(center, 0.99), 1);
+          } else if (exitSide === 'a') {
+            pts = subPolyline(shape, 0, Math.max(center, 0.01));
+            if (pts.length >= 2) pts.reverse();
+          } else {
+            pts = restSide === 'a' ? shape.slice() : shape.slice().reverse();
+          }
         }
       } else {
         const entrySide = edgeSideOf(tid, allTracks[i-1]);
@@ -1030,7 +1050,7 @@ function updateYard(state, prevState) {
     // the same geometry as the movement animation instead of per-track spans
     // stitched together with straight connector lines.
     const route = state.train_path && state.train_path[train]
-      ? buildMovePath(train, state, prevState)
+      ? buildMovePath(train, state, prevState, true)
       : null;
     if (!route || route.length < 2) return;
     const poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
