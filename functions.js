@@ -430,50 +430,41 @@ function _moveDrawFrame(t) {
     trailAcc += segLen;
   }
 
-  // Draw train sprites with fixed height TRAIN_H, clipped to span
+  // Draw train sprites: fixed natural size, only position + rotation change
   if (_moveUnits.length > 0) {
     let unitOffset = 0;
     _moveUnits.forEach(u => {
-      const unitNatW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
-      // Compute path-span length in SVG coords
-      const pStart = pointOnPath(_movePath, Math.max(0, frontDist - unitOffset - unitNatW));
-      const pEnd = pointOnPath(_movePath, Math.max(0, frontDist - unitOffset));
-      const svgSpanLen = Math.hypot(toSvgX(pEnd.x) - toSvgX(pStart.x), toSvgY(pEnd.y) - toSvgY(pStart.y));
-      const visLen = Math.max(10, svgSpanLen);
-      const midD = Math.max(0, Math.min(_moveTotalLen, (Math.max(0, frontDist - unitOffset - visLen) + Math.max(0, frontDist - unitOffset)) / 2));
-      const fwdD = Math.min(_moveTotalLen, midD + 3);
+      const natW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
+      const frontD = Math.max(0, frontDist - unitOffset);
+      const backD = Math.max(0, frontD - natW);
+      const midD = (frontD + backD) / 2;
       const pm = pointOnPath(_movePath, midD);
-      const pf = pointOnPath(_movePath, fwdD);
       const cx = toSvgX(pm.x);
       const cy = toSvgY(pm.y);
-      let deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
+      let deg = pm.angle;
       if (deg > 90) deg -= 180;
       else if (deg < -90) deg += 180;
       if (u.img) {
-        const clipPct = Math.max(0, (1 - visLen / unitNatW) * 100);
         const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         el.setAttribute('href', u.img.uri);
-        el.setAttribute('x', visLen / 2 - unitNatW);
+        el.setAttribute('x', -natW / 2);
         el.setAttribute('y', -TRAIN_H);
-        el.setAttribute('width', unitNatW);
+        el.setAttribute('width', natW);
         el.setAttribute('height', TRAIN_H);
         el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
-        el.setAttribute('style', clipPct > 0
-          ? `pointer-events:none; clip-path: polygon(${clipPct}% 0, 100% 0, 100% 100%, ${clipPct}% 100%)`
-          : 'pointer-events:none');
+        el.setAttribute('style', 'pointer-events:none');
         if (train) el.setAttribute('data-train', train);
         el.setAttribute('data-move-anim','1');
         layer.appendChild(el);
       }
-      unitOffset += visLen;
+      unitOffset += natW;
     });
   } else {
     const midDist = Math.max(0, frontDist - TRAIN_H);
     const pm = pointOnPath(_movePath, midDist);
-    const pf = pointOnPath(_movePath, Math.min(_moveTotalLen, frontDist));
-    const cx = toSvgX((pm.x + pf.x) / 2);
-    const cy = toSvgY((pm.y + pf.y) / 2);
-    let deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
+    const cx = toSvgX(pm.x);
+    const cy = toSvgY(pm.y);
+    let deg = pm.angle;
     if (deg > 90) deg -= 180;
     else if (deg < -90) deg += 180;
     const w = Math.max(10, TRAIN_H * 1.5);
