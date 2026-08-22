@@ -193,6 +193,8 @@ let _moveAnimIdx = -1;
 let _moveAnimFinished = false;
 let _movePathFrontOffset = 0;
 let _moveFrontOff = 0;
+let _moveClipPct = 0;
+let _moveSpriteWidths = [];
 
 function buildMovePath(train, state, prevState, startAtTail) {
   const trackIds = state.train_path && state.train_path[train];
@@ -359,9 +361,6 @@ function pointOnPath(polyline, dist) {
     angle: Math.atan2(last[1]-prev[1], last[0]-prev[0]) * 180 / Math.PI
   };
 }
-
-let _moveClipPct = 0;
-let _moveSpriteWidths = [];
 
 function startMoveAnim(state, prevState) {
   cancelMoveAnim();
