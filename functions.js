@@ -450,13 +450,17 @@ function _moveDrawFrame(t) {
       if (deg > 90) deg -= 180;
       else if (deg < -90) deg += 180;
       if (u.img) {
-        const imgX = -unitNatW / 2;
+        const clipPct = Math.max(0, (1 - visLen / unitNatW) * 100);
         const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         el.setAttribute('href', u.img.uri);
-        el.setAttribute('x', imgX); el.setAttribute('y', -TRAIN_H);
-        el.setAttribute('width', unitNatW); el.setAttribute('height', TRAIN_H);
+        el.setAttribute('x', visLen / 2 - unitNatW);
+        el.setAttribute('y', -TRAIN_H);
+        el.setAttribute('width', unitNatW);
+        el.setAttribute('height', TRAIN_H);
         el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
-        el.setAttribute('style', 'pointer-events:none');
+        el.setAttribute('style', clipPct > 0
+          ? `pointer-events:none; clip-path: polygon(${clipPct}% 0, 100% 0, 100% 100%, ${clipPct}% 100%)`
+          : 'pointer-events:none');
         if (train) el.setAttribute('data-train', train);
         el.setAttribute('data-move-anim','1');
         layer.appendChild(el);
@@ -989,28 +993,6 @@ function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainN
   const cx = toSvgX((pts[0][0] + pts[pts.length - 1][0]) / 2);
   const cy = toSvgY((pts[0][1] + pts[pts.length - 1][1]) / 2);
   let deg = segAngle(pts);
-  // Build a clipPath band around the sub-polyline chord
-  const clipId = 'tc-' + trackId + '-' + fStart.toFixed(4) + '-' + fEnd.toFixed(4);
-  const svgEl = document.getElementById('yard-svg');
-  if (svgEl && !document.getElementById(clipId)) {
-    const sx = toSvgX(pts[0][0]), sy = toSvgY(pts[0][1]);
-    const ex = toSvgX(pts[pts.length-1][0]), ey = toSvgY(pts[pts.length-1][1]);
-    const dx = ex - sx, dy = ey - sy;
-    const len = Math.hypot(dx, dy);
-    if (len > 1) {
-      const buf = TRAIN_H + 5;
-      const nx = -dy / len * buf, ny = dx / len * buf;
-      const cp = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
-      cp.setAttribute('id', clipId);
-      cp.setAttribute('clipPathUnits', 'userSpaceOnUse');
-      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-      poly.setAttribute('points',
-        (sx+nx)+','+(sy+ny)+' '+(ex+nx)+','+(ey+ny)+' '+(ex-nx)+','+(ey-ny)+' '+(sx-nx)+','+(sy-ny));
-      cp.appendChild(poly);
-      svgEl.appendChild(cp);
-    }
-  }
-  // Right-align image: right edge at segLen/2, left edge at segLen/2 - natW
   const imgX = segLen / 2 - natW;
   const el = document.createElementNS('http://www.w3.org/2000/svg','image');
   el.setAttribute('href', img.uri);
@@ -1019,8 +1001,10 @@ function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainN
   el.setAttribute('width', natW);
   el.setAttribute('height', TRAIN_H);
   el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
-  if (document.getElementById(clipId)) el.setAttribute('clip-path', `url(#${clipId})`);
-  el.setAttribute('style','pointer-events:none');
+  const clipPct = Math.max(0, (1 - segLen / natW) * 100);
+  el.setAttribute('style', clipPct > 0
+    ? `pointer-events:none; clip-path: polygon(${clipPct}% 0, 100% 0, 100% 100%, ${clipPct}% 100%)`
+    : 'pointer-events:none');
   if (parked) el.setAttribute('filter','url(#greenTint)');
   if (trainName) el.setAttribute('data-train', trainName);
   document.getElementById('train-layer').appendChild(el);
