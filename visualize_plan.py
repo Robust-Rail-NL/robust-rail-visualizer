@@ -43,13 +43,13 @@ def load_json(path):
         return json.load(handle)
 
 
-def sanitize_pddl_name(name):
-    text = str(name).replace("-", "_")
-    if not text:
-        return text
-    if text[0].isdigit():
-        return "o_" + text
-    return text
+# def sanitize_pddl_name(name):
+#     text = str(name).replace("-", "_")
+#     if not text:
+#         return text
+#     if text[0].isdigit():
+#         return "o_" + text
+#     return text
 
 
 def unsanitize_track_token(token):
@@ -1135,7 +1135,6 @@ let _moveState = null;
 let _movePrevState = null;
 let _movePath = null;
 let _moveTotalLen = 0;
-let _moveFixedW = 60;
 let _moveUnits = [];
 let _moveAnimCompleted = false;
 let _moveAnimIdx = -1;
@@ -1288,21 +1287,15 @@ function startMoveAnim(state, prevState) {{
   _moveState = state;
   _movePrevState = prevState;
   const units = data.trainUnits ? data.trainUnits[train] : null;
-  const totalLen = data.trainLengths ? data.trainLengths[train] : 0;
   if (units && units.length) {{
-    const unitTotal = units.reduce((s, u) => s + (u.length || 0), 0) || units.length;
     _moveUnits = units.map(u => {{
-      const frac = (u.length || 0) > 0 ? u.length / unitTotal : 1 / units.length;
-      return {{ typePrefix: u.typePrefix, frac: frac, img: data.unitImages ? data.unitImages[u.typePrefix] : null }};
+      return {{ typePrefix: u.typePrefix, length: u.length || 0, img: data.unitImages ? data.unitImages[u.typePrefix] : null }};
     }});
   }} else {{
     _moveUnits = [];
   }}
-  _moveFixedW = 60;
-  if (totalLen > 0 && _moveUnits.length) {{
-    const avgTrackLen = 800;
-    _moveFixedW = Math.max(30, Math.min(120, totalLen * (_moveTotalLen / avgTrackLen)));
-  }}
+  // Constant speed: 300 px/s, clamped 300ms - 5000ms
+  _moveDuration = Math.max(300, Math.min(5000, (_moveTotalLen / 300) * 1000));
   const trainEls = document.querySelectorAll('#train-layer [data-train="'+train+'"]');
   trainEls.forEach(el => {{ el.setAttribute('data-move-hidden','1'); el.style.display='none'; }});
   _moveStart = performance.now();
@@ -1315,6 +1308,7 @@ function cancelMoveAnim() {{
     el.removeAttribute('data-move-hidden'); el.style.display='';
   }});
   document.querySelectorAll('#train-layer [data-move-anim]').forEach(el => el.remove());
+  document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
   document.querySelectorAll('#edges-layer line[data-move-hl]').forEach(el => {{
     el.setAttribute('stroke','var(--yard-edge)'); el.setAttribute('stroke-width','1.5');
     el.removeAttribute('data-move-hl');
@@ -1346,6 +1340,8 @@ function _moveDrawFrame(t) {{
   if (!_movePath || !_moveState) return;
   const layer = document.getElementById('train-layer');
   layer.querySelectorAll('[data-move-anim]').forEach(el => el.remove());
+  // Remove stale animation clipPaths so they are recreated at the current position
+  document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
   const train = _moveState.train;
   const color = trainColorMap[train] || '#888';
   const easeT = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
@@ -1382,48 +1378,52 @@ function _moveDrawFrame(t) {{
     trailAcc += segLen;
   }}
 
-  // Draw train sprites with constant size
-  const sampleD = 3;
+  // Draw train sprites with fixed height TRAIN_H, clipped to span
   if (_moveUnits.length > 0) {{
     let unitOffset = 0;
     _moveUnits.forEach(u => {{
-      const unitLen = _moveFixedW * u.frac * 0.6;
-      const unitStart = frontDist - unitOffset - unitLen;
-      const unitEnd = frontDist - unitOffset;
-      if (unitEnd < 0 || unitStart > _moveTotalLen) {{ unitOffset += unitLen; return; }}
-      const midD = Math.max(0, Math.min(_moveTotalLen, (unitStart + unitEnd) / 2));
-      const fwdD = Math.min(_moveTotalLen, midD + sampleD);
+      const unitNatW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
+      // Compute path-span length in SVG coords
+      const pStart = pointOnPath(_movePath, Math.max(0, frontDist - unitOffset - unitNatW));
+      const pEnd = pointOnPath(_movePath, Math.max(0, frontDist - unitOffset));
+      const svgSpanLen = Math.hypot(toSvgX(pEnd.x) - toSvgX(pStart.x), toSvgY(pEnd.y) - toSvgY(pStart.y));
+      const visLen = Math.max(10, svgSpanLen);
+      const midD = Math.max(0, Math.min(_moveTotalLen, (Math.max(0, frontDist - unitOffset - visLen) + Math.max(0, frontDist - unitOffset)) / 2));
+      const fwdD = Math.min(_moveTotalLen, midD + 3);
       const pm = pointOnPath(_movePath, midD);
       const pf = pointOnPath(_movePath, fwdD);
       const cx = toSvgX(pm.x);
       const cy = toSvgY(pm.y);
-      const deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
-      const w = Math.max(10, unitLen);
+      let deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
+      if (deg > 90) deg -= 180;
+      else if (deg < -90) deg += 180;
       if (u.img) {{
-        const h = Math.max(3, w * u.img.aspect);
+        const imgX = -unitNatW / 2;
         const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         el.setAttribute('href', u.img.uri);
-        el.setAttribute('x', -w/2); el.setAttribute('y', -h);
-        el.setAttribute('width', w); el.setAttribute('height', h);
+        el.setAttribute('x', imgX); el.setAttribute('y', -TRAIN_H);
+        el.setAttribute('width', unitNatW); el.setAttribute('height', TRAIN_H);
         el.setAttribute('transform', `translate(${{cx}},${{cy}}) rotate(${{deg}})`);
         el.setAttribute('style', 'pointer-events:none');
         if (train) el.setAttribute('data-train', train);
         el.setAttribute('data-move-anim','1');
         layer.appendChild(el);
       }}
-      unitOffset += unitLen;
+      unitOffset += visLen;
     }});
   }} else {{
-    const midDist = Math.max(0, frontDist - _moveFixedW * 0.3);
+    const midDist = Math.max(0, frontDist - TRAIN_H);
     const pm = pointOnPath(_movePath, midDist);
     const pf = pointOnPath(_movePath, Math.min(_moveTotalLen, frontDist));
     const cx = toSvgX((pm.x + pf.x) / 2);
     const cy = toSvgY((pm.y + pf.y) / 2);
-    const w = Math.max(10, _moveFixedW * 0.6);
-    const deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
+    let deg = Math.atan2(pf.y - pm.y, pf.x - pm.x) * 180 / Math.PI;
+    if (deg > 90) deg -= 180;
+    else if (deg < -90) deg += 180;
+    const w = Math.max(10, TRAIN_H * 1.5);
     const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    el.setAttribute('x', -w/2); el.setAttribute('y', -6);
-    el.setAttribute('width', w); el.setAttribute('height', 12);
+    el.setAttribute('x', -w/2); el.setAttribute('y', -TRAIN_H/2);
+    el.setAttribute('width', w); el.setAttribute('height', TRAIN_H);
     el.setAttribute('rx', 3); el.setAttribute('fill', color);
     el.setAttribute('transform', `translate(${{cx}},${{cy}}) rotate(${{deg}})`);
     el.setAttribute('style', 'pointer-events:none');
@@ -1482,11 +1482,15 @@ function Particle(x, y, vx, vy, size, imgUri, life) {{
   this.opacity = 1;
 }}
 
-// Compute the fraction range a train occupies on a track (replicates updateYard anchor logic)
+// Compute the fraction range a train occupies on a track (replicates updateYard anchor logic).
+// Stacking is clamped to the parkable straight range when available.
 function trainFractionsOnTrack(train, trackId, state) {{
   const pos = positions[trackId];
   const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
   if (!shape) return null;
+  const pr = parkableRanges[trackId];
+  const rangeStart = pr ? pr.startFrac : 0;
+  const rangeEnd = pr ? pr.endFrac : 1;
   const trainsOnTrack = [];
   Object.keys(state.trains).forEach(t => {{
     const info = state.trains[t];
@@ -1502,15 +1506,15 @@ function trainFractionsOnTrack(train, trackId, state) {{
     const info = state.trains[t];
     (info.restSide === 'a' ? anchorA : anchorB).push(t);
   }});
-  let cum = 0;
+  let cum = rangeStart;
   for (const t of anchorA) {{
-    const end = Math.min(1, cum + trainRatio(t, trackId));
+    const end = Math.min(rangeEnd, cum + trainRatio(t, trackId) * (rangeEnd - rangeStart));
     if (t === train) return [cum, end];
     cum = end;
   }}
-  let cumEnd = 1;
+  let cumEnd = rangeEnd;
   for (const t of anchorB) {{
-    const start = Math.max(0, cumEnd - trainRatio(t, trackId));
+    const start = Math.max(rangeStart, cumEnd - trainRatio(t, trackId) * (rangeEnd - rangeStart));
     if (t === train) return [start, cumEnd];
     cumEnd = start;
   }}
@@ -1793,6 +1797,87 @@ function subPolyline(shape, fStart, fEnd) {{
   return pts;
 }}
 
+// ---- PARKABLE RANGES & GLOBAL SCALE ----
+// For each track with a shape, find the longest straight sub-segment where
+// consecutive turning angles stay below 10 degrees.  Trains may only park
+// within this straight portion.
+const parkableRanges = {{}};
+(function computeParkableRanges() {{
+  const ANGLE_THRESH = 10; // degrees
+  Object.keys(positions).forEach(tid => {{
+    const pos = positions[tid];
+    const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
+    if (!shape) {{ parkableRanges[tid] = null; return; }}
+    const total = polylineLength(shape);
+    if (total <= 0) {{ parkableRanges[tid] = null; return; }}
+    // Find the longest straight sub-segment by walking with a sliding window
+    let bestStart = 0, bestEnd = 1, bestLen = 0;
+    let segStart = 0;
+    for (let i = 2; i < shape.length; i++) {{
+      const ax = shape[i-2][0], ay = shape[i-2][1];
+      const bx = shape[i-1][0], by = shape[i-1][1];
+      const cx = shape[i][0], cy = shape[i][1];
+      const a1 = Math.atan2(by - ay, bx - ax);
+      const a2 = Math.atan2(cy - by, cx - bx);
+      let diff = (a2 - a1) * 180 / Math.PI;
+      while (diff > 180) diff -= 360;
+      while (diff < -180) diff += 360;
+      if (Math.abs(diff) > ANGLE_THRESH) {{
+        // Straight segment ended at point i-1
+        const segLen = 0; // recalc from segStart to i-1
+        let accD = 0;
+        for (let j = segStart + 1; j <= i - 1; j++) {{
+          accD += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
+        }}
+        if (accD > bestLen) {{ bestLen = accD; bestStart = segStart; bestEnd = i - 1; }}
+        segStart = i - 1;
+      }}
+    }}
+    // Check the final segment
+    {{
+      let accD = 0;
+      for (let j = segStart + 1; j < shape.length; j++) {{
+        accD += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
+      }}
+      if (accD > bestLen) {{ bestLen = accD; bestStart = segStart; bestEnd = shape.length - 1; }}
+    }}
+    // Convert point indices to fractions
+    let dStart = 0;
+    for (let j = 1; j <= bestStart; j++) {{
+      dStart += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
+    }}
+    let dEnd = dStart;
+    for (let j = bestStart + 1; j <= bestEnd; j++) {{
+      dEnd += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
+    }}
+    parkableRanges[tid] = {{
+      startFrac: total > 0 ? dStart / total : 0,
+      endFrac: total > 0 ? dEnd / total : 1,
+      pixelLength: bestLen
+    }};
+  }});
+}})();
+
+// Global scale factor: map physical metres to pixel width so that if the real
+// train lengths fit on a track, the visual sprites fit too.  Derived from the
+// track whose straight segment has the *smallest* pixel-to-metre ratio (the
+// most compressed rendering).  Falls back to 1 px/m when no track has a
+// physical length.
+let globalScale = 1;
+const DEFAULT_TRACK_PHYSICAL_M = 200;
+(function computeGlobalScale() {{
+  let bestRatio = Infinity;
+  Object.keys(parkableRanges).forEach(tid => {{
+    const pr = parkableRanges[tid];
+    if (!pr) return;
+    const meta = trackMeta[tid];
+    const physM = (meta && meta.length > 0) ? meta.length : DEFAULT_TRACK_PHYSICAL_M;
+    const ratio = pr.pixelLength / physM;
+    if (ratio < bestRatio) bestRatio = ratio;
+  }});
+  if (bestRatio < Infinity && bestRatio > 0) globalScale = bestRatio;
+}})();
+
 function trainRatio(train, trackId) {{
   const trackLen = trackMeta[trackId] ? trackMeta[trackId].length : 0;
   const trainLen = data.trainLengths ? data.trainLengths[train] : 0;
@@ -1818,78 +1903,91 @@ function drawTrainSegment(trackId, fStart, fEnd, color, width) {{
   document.getElementById('train-layer').appendChild(poly);
 }}
 
-// Direction (degrees) of the first->last chord of a sub-polyline. Track shapes
-// use image/SVG coordinates, so a y-down rotation keeps the sprite aligned.
+// Direction (degrees) of the first->last chord of a sub-polyline.  Normalised
+// so the sprite is never flipped more than 90 degrees from upright.
 function segAngle(pts) {{
   if (!pts || pts.length < 2) return 0;
   const a = pts[0], b = pts[pts.length - 1];
-  return Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+  let deg = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+  if (deg > 90) deg -= 180;
+  else if (deg < -90) deg += 180;
+  return deg;
 }}
 
-// Minimum visible width (px) for a whole train on a track, so arrivals on short
-// entry tracks (e.g. 906a) are clearly visible instead of a ~12px sliver.
-const MIN_TRAIN_PX = 30;
-// Draw one unit's sprite along the track fraction [fStart, fEnd]. The sprite is
-// scaled so its width covers that fraction, sits bottom-center on the rail, and
-// is rotated so the train's FRONT faces the wall it rests flush against (the
-// restSide end). `flip` cancels sprites that face left inside their own image.
-function drawTrainSprite(trackId, fStart, fEnd, typePrefix, restSideB, flip, parked, trainName) {{
+// Fixed height (SVG units) for all train sprites.  The image is rendered at
+// its natural aspect ratio; if it is wider than the lit segment, the excess
+// is clipped from the LEFT so the front/right of the train stays visible.
+const TRAIN_H = 30;
+
+// Draw one unit's sprite.  Height is TRAIN_H, width is the natural image width
+// at that height, right-aligned to the segment end.  A band clipPath around the
+// sub-polyline chord slices off the left overflow.
+function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainName) {{
   const pos = positions[trackId];
   const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
   const img = data.unitImages ? data.unitImages[typePrefix] : null;
   if (!shape || !img) return;
   const pts = subPolyline(shape, fStart, fEnd);
   if (pts.length < 2) return;
-  const w = Math.max(3, polylineLength(pts));
-  const h = Math.max(3, w * img.aspect);
+  // Segment length in SVG coordinates (handles both background-image and
+  // no-background coordinate systems correctly).
+  const svgPts = pts.map(p => [toSvgX(p[0]), toSvgY(p[1])]);
+  const segLen = polylineLength(svgPts);
+  const natW = TRAIN_H / img.aspect;
   const cx = toSvgX((pts[0][0] + pts[pts.length - 1][0]) / 2);
   const cy = toSvgY((pts[0][1] + pts[pts.length - 1][1]) / 2);
   let deg = segAngle(pts);
+  // Build a clipPath band around the sub-polyline chord
+  const clipId = 'tc-' + trackId + '-' + fStart.toFixed(4) + '-' + fEnd.toFixed(4);
+  const svgEl = document.getElementById('yard-svg');
+  if (svgEl && !document.getElementById(clipId)) {{
+    const sx = toSvgX(pts[0][0]), sy = toSvgY(pts[0][1]);
+    const ex = toSvgX(pts[pts.length-1][0]), ey = toSvgY(pts[pts.length-1][1]);
+    const dx = ex - sx, dy = ey - sy;
+    const len = Math.hypot(dx, dy);
+    if (len > 1) {{
+      const buf = TRAIN_H + 5;
+      const nx = -dy / len * buf, ny = dx / len * buf;
+      const cp = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+      cp.setAttribute('id', clipId);
+      cp.setAttribute('clipPathUnits', 'userSpaceOnUse');
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      poly.setAttribute('points',
+        (sx+nx)+','+(sy+ny)+' '+(ex+nx)+','+(ey+ny)+' '+(ex-nx)+','+(ey-ny)+' '+(sx-nx)+','+(sy-ny));
+      cp.appendChild(poly);
+      svgEl.appendChild(cp);
+    }}
+  }}
+  // Right-align image: right edge at segLen/2, left edge at segLen/2 - natW
+  const imgX = segLen / 2 - natW;
   const el = document.createElementNS('http://www.w3.org/2000/svg','image');
   el.setAttribute('href', img.uri);
-  el.setAttribute('x', -w/2);
-  el.setAttribute('y', -h);
-  el.setAttribute('width', w);
-  el.setAttribute('height', h);
+  el.setAttribute('x', imgX);
+  el.setAttribute('y', -TRAIN_H);
+  el.setAttribute('width', natW);
+  el.setAttribute('height', TRAIN_H);
   el.setAttribute('transform', `translate(${{cx}},${{cy}}) rotate(${{deg}})`);
+  if (document.getElementById(clipId)) el.setAttribute('clip-path', `url(#${{clipId}})`);
   el.setAttribute('style','pointer-events:none');
   if (parked) el.setAttribute('filter','url(#greenTint)');
   if (trainName) el.setAttribute('data-train', trainName);
   document.getElementById('train-layer').appendChild(el);
 }}
 
-// Draw a train's proportional segment (colored base), then one sprite per
-// member laid out in name order from the rest anchor, split by member length.
-function drawTrainOnTrack(trackId, fStart, fEnd, train, restSideB, parked, minPx) {{
-  const _minPx = minPx || MIN_TRAIN_PX;
-  // Widen spans that would render as a tiny sliver (short entry tracks) so the
-  // whole train stays visible; grow away from the wall the train rests flush
-  // against, clamped to the track. Unknown restSide trains are anchored at the
-  // b-end, so infer the flush wall from the fractions rather than restSideB.
-  const pos = positions[trackId];
-  const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
-  if (shape) {{
-    const spanLen = polylineLength(subPolyline(shape, fStart, fEnd));
-    const totalLen = polylineLength(shape);
-    if (spanLen > 0 && spanLen < _minPx && totalLen > 0) {{
-      const wantFrac = Math.min(1, _minPx / totalLen);
-      const extra = Math.max(0, wantFrac - (fEnd - fStart));
-      if (fEnd >= 1 - 1e-6) fStart = Math.max(0, fStart - extra);       // flush at b-end
-      else if (fStart <= 1e-6) fEnd = Math.min(1, fEnd + extra);        // flush at a-end
-      else {{ fStart = Math.max(0, fStart - extra / 2); fEnd = Math.min(1, fEnd + extra / 2); }}
-    }}
-  }}
+// Draw a train's colored segment and one sprite per member laid out in name
+// order from the rest anchor.  Each sprite has fixed height TRAIN_H and is
+// clipped to the fraction span.
+function drawTrainOnTrack(trackId, fStart, fEnd, train, restSideB, parked) {{
   drawTrainSegment(trackId, fStart, fEnd, trainColorMap[train]);
   const units = data.trainUnits ? data.trainUnits[train] : null;
   if (!units || !units.length) return;
-  const total = units.reduce((s,u) => s + (u.length || 0), 0) || units.length;
   let cur = fStart;
   units.forEach(u => {{
-    const span = (u.length || 0) > 0 ? (u.length / total) * (fEnd - fStart) : (fEnd - fStart) / units.length;
+    const span = (u.length || 0) > 0 ? (u.length / (units.reduce((s,x) => s + (x.length || 0), 0) || units.length)) * (fEnd - fStart) : (fEnd - fStart) / units.length;
     const next = Math.min(fEnd, cur + span);
     if (next > cur) {{
       const img = data.unitImages ? data.unitImages[u.typePrefix] : null;
-      drawTrainSprite(trackId, cur, next, u.typePrefix, restSideB, !!(img && img.flip), parked, train);
+      drawTrainSprite(trackId, cur, next, u.typePrefix, !!(img && img.flip), parked, train);
     }}
     cur = next;
   }});
@@ -1905,15 +2003,19 @@ function edgeSideOf(trackId, neighborId) {{
   return null;
 }}
 
-// Fraction span a train occupies on trackId when parked flush against `side`.
+// Fraction span a train occupies on trackId when parked flush against `side`,
+// clamped to the parkable range.
 function parkedSpan(trackId, train, side) {{
   const ratio = trainRatio(train, trackId);
-  return side === 'a' ? [0, Math.min(1, ratio)] : [Math.max(0, 1 - ratio), 1];
+  const pr = parkableRanges[trackId];
+  const lo = pr ? pr.startFrac : 0;
+  const hi = pr ? pr.endFrac : 1;
+  const span = hi - lo;
+  return side === 'a' ? [lo, Math.min(hi, lo + ratio * span)] : [Math.max(lo, hi - ratio * span), hi];
 }}
 
 function updateYard(state, prevState) {{
   if(!hasPositions) return;
-  const effectiveMinPx = (state.action_type === 'arrive' || state.action_type === 'depart') ? 50 : MIN_TRAIN_PX;
   document.querySelectorAll('#edges-layer line').forEach(l => {{
     l.setAttribute('stroke','var(--yard-edge)'); l.setAttribute('stroke-width','1.5');
   }});
@@ -1932,6 +2034,9 @@ function updateYard(state, prevState) {{
     }}
   }});
   document.getElementById('train-layer').innerHTML='';
+  // Clean up previous clipPaths from train sprites
+  const svgEl = document.getElementById('yard-svg');
+  if (svgEl) svgEl.querySelectorAll('clipPath[id^="tc-"]').forEach(cp => cp.remove());
   const trainsToShow=filterTrain?[filterTrain]:allTrains;
   trainsToShow.forEach(train => {{
     const info=state.trains[train];
@@ -2060,21 +2165,24 @@ function updateYard(state, prevState) {{
     const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
     const node = document.getElementById('node-'+trackId.replace(/[^a-zA-Z0-9]/g,'_'));
     if (shape) {{
+      const pr = parkableRanges[trackId];
+      const rangeStart = pr ? pr.startFrac : 0;
+      const rangeEnd = pr ? pr.endFrac : 1;
       const anchorA = [], anchorB = [];
       groups[trackId].forEach(train => {{
         const info = state.trains[train];
         (info.restSide === 'a' ? anchorA : anchorB).push(train);
       }});
-      let cum = 0;
+      let cum = rangeStart;
       anchorA.forEach(train => {{
-        const end = Math.min(1, cum + trainRatio(train, trackId));
-        if (end > cum) drawTrainOnTrack(trackId, cum, end, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked, effectiveMinPx);
+        const end = Math.min(rangeEnd, cum + trainRatio(train, trackId) * (rangeEnd - rangeStart));
+        if (end > cum) drawTrainOnTrack(trackId, cum, end, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked);
         cum = end;
       }});
-      let cumEnd = 1;
+      let cumEnd = rangeEnd;
       anchorB.forEach(train => {{
-        const start = Math.max(0, cumEnd - trainRatio(train, trackId));
-        if (cumEnd > start) drawTrainOnTrack(trackId, start, cumEnd, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked, effectiveMinPx);
+        const start = Math.max(rangeStart, cumEnd - trainRatio(train, trackId) * (rangeEnd - rangeStart));
+        if (cumEnd > start) drawTrainOnTrack(trackId, start, cumEnd, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked);
         cumEnd = start;
       }});
     }} else if (node) {{
