@@ -191,6 +191,8 @@ let _moveUnits = [];
 let _moveAnimCompleted = false;
 let _moveAnimIdx = -1;
 let _moveAnimFinished = false;
+let _movePathFrontOffset = 0;
+let _moveFrontOff = 0;
 
 function buildMovePath(train, state, prevState, startAtTail) {
   const trackIds = state.train_path && state.train_path[train];
@@ -203,6 +205,7 @@ function buildMovePath(train, state, prevState, startAtTail) {
     allTracks = trackIds.slice();
   }
   if (allTracks.length < 2) return null;
+  _movePathFrontOffset = 0;
   const combined = [];
   const segStartIdx = [];
   for (let i = 0; i < allTracks.length; i++) {
@@ -218,7 +221,9 @@ function buildMovePath(train, state, prevState, startAtTail) {
         let boundary = null;
         if (startAtTail && prevState && prevState.trains[train]) {
           const span = trainFractionsOnTrack(train, tid, prevState);
-          if (span) {
+          // Degenerate spans ([0,0], e.g. missing train lengths over-subscribing
+          // a shared track) carry no position information -> use the fallback.
+          if (span && span[1] - span[0] > 0.005) {
             boundary = span[1];
             const tailFrac = span[0];
             const exitSide0 = edgeSideOf(tid, allTracks[1]);
@@ -227,6 +232,11 @@ function buildMovePath(train, state, prevState, startAtTail) {
             } else if (exitSide0 === 'a') {
               pts = subPolyline(shape, 0, Math.max(boundary, 0.01));
               if (pts.length >= 2) pts.reverse();
+            }
+            if (pts && pts.length >= 2) {
+              // Arc distance from the path start (the train's tail) to its nose,
+              // so the animation can place sprites at their true parked spot.
+              _movePathFrontOffset = (boundary - tailFrac) * polylineLength(shape);
             }
           }
         }
@@ -354,11 +364,14 @@ function startMoveAnim(state, prevState) {
   cancelMoveAnim();
   const train = state.train;
   if (!train) return;
-  const path = buildMovePath(train, state, prevState);
+  // Build from the train's true parked tail so sprites start where the train
+  // actually stands (mid-track parking included), not at a flush-parking guess.
+  const path = buildMovePath(train, state, prevState, true);
   if (!path || path.length < 2) return;
   _movePath = path;
   _moveTotalLen = polylineLength(path);
   if (_moveTotalLen <= 0) return;
+  _moveFrontOff = Math.min(_movePathFrontOffset, _moveTotalLen * 0.9);
   _moveState = state;
   _movePrevState = prevState;
   const units = data.trainUnits ? data.trainUnits[train] : null;
@@ -384,7 +397,7 @@ function cancelMoveAnim() {
   });
   document.querySelectorAll('#train-layer [data-move-anim]').forEach(el => el.remove());
   document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
-  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = [];
+  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = []; _moveFrontOff = 0;
 }
 
 function _moveMoveLoop() {
@@ -413,7 +426,9 @@ function _moveDrawFrame(t) {
   const train = _moveState.train;
   const color = trainColorMap[train] || '#888';
   const easeT = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
-  const frontDist = easeT * _moveTotalLen;
+  // The path starts at the train's rear, so the nose begins _moveFrontOff into
+  // the path (its true parked position) and travels the remainder.
+  const frontDist = _moveFrontOff + easeT * (_moveTotalLen - _moveFrontOff);
 
   // Draw train sprites: fixed natural size, only position + rotation change
   if (_moveUnits.length > 0) {
