@@ -190,7 +190,6 @@ let _moveTotalLen = 0;
 let _moveUnits = [];
 let _moveAnimCompleted = false;
 let _moveAnimIdx = -1;
-let _moveTrackSegs = [];
 let _moveAnimFinished = false;
 
 function buildMovePath(train, state, prevState) {
@@ -205,14 +204,13 @@ function buildMovePath(train, state, prevState) {
   }
   if (allTracks.length < 2) return null;
   const combined = [];
-  _moveTrackSegs = [];
-  let distAcc = 0;
+  const segStartIdx = [];
   for (let i = 0; i < allTracks.length; i++) {
     const tid = allTracks[i];
     const pos = positions[tid];
     const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
+    let pts = null;
     if (shape) {
-      let pts;
       if (i === 0) {
         const restSide = (prevState.trains[train] && prevState.trains[train].restSide) || 'b';
         const ratio = trainRatio(train, tid);
@@ -220,38 +218,38 @@ function buildMovePath(train, state, prevState) {
         const exitSide = edgeSideOf(tid, allTracks[1]);
         if (exitSide === 'b') {
           pts = subPolyline(shape, Math.min(center, 0.99), 1);
-        } else {
+        } else if (exitSide === 'a') {
           pts = subPolyline(shape, 0, Math.max(center, 0.01));
           if (pts.length >= 2) pts.reverse();
+        } else {
+          pts = restSide === 'a' ? shape.slice() : shape.slice().reverse();
         }
       } else {
         const entrySide = edgeSideOf(tid, allTracks[i-1]);
         pts = (entrySide === 'b') ? shape.slice().reverse() : shape.slice();
       }
-      if (pts && pts.length >= 2) {
-        if (combined.length > 0) {
-          const last = combined[combined.length - 1];
-          const first = pts[0];
-          if (Math.abs(last[0] - first[0]) < 0.01 && Math.abs(last[1] - first[1]) < 0.01 && pts.length > 2) {
-            pts.shift();
-          }
-        }
-        if (pts.length >= 2) {
-          const segLen = polylineLength(pts);
-          _moveTrackSegs.push({ trackId: tid, startDist: distAcc, endDist: distAcc + segLen });
-          distAcc += segLen;
-          combined.push.apply(combined, pts);
+    }
+    if (pts && pts.length >= 2) {
+      segStartIdx.push(Math.max(0, combined.length - 1));
+      let start = 0;
+      if (combined.length > 0) {
+        const last = combined[combined.length - 1];
+        const first = pts[0];
+        if (Math.abs(last[0] - first[0]) < 0.01 && Math.abs(last[1] - first[1]) < 0.01 && pts.length > 2) {
+          start = 1;
         }
       }
+      for (let j = start; j < pts.length; j++) combined.push(pts[j]);
     } else {
       const x = pos ? pos.x : 0;
       const y = pos ? pos.y : 0;
       if (combined.length === 0 || Math.abs(combined[combined.length-1][0] - x) > 0.01 || Math.abs(combined[combined.length-1][1] - y) > 0.01) {
         combined.push([x, y]);
+        segStartIdx.push(combined.length - 1);
       }
     }
   }
-  if (combined.length >= 2 && allTracks.length >= 2 && _moveTrackSegs.length > 0) {
+  if (combined.length >= 2 && allTracks.length >= 2 && segStartIdx.length > 0) {
     const destTrack = allTracks[allTracks.length - 1];
     const destEntrySide = edgeSideOf(destTrack, allTracks[allTracks.length - 2]);
     let frontFrac = null;
@@ -282,19 +280,24 @@ function buildMovePath(train, state, prevState) {
       }
     }
     if (frontFrac !== null && frontFrac > 0.02 && frontFrac < 0.99) {
-      const lastSeg = _moveTrackSegs[_moveTrackSegs.length - 1];
-      const segLen = lastSeg.endDist - lastSeg.startDist;
+      // Distances must come from the actual polyline: hops between tracks can
+      // cover extra ground (switch centres sit off the shape ends, and a path's
+      // first element need not neighbour the source track), so incrementally
+      // summed shape lengths drift and the cut would land far too early.
+      const startIdx = segStartIdx[segStartIdx.length - 1];
+      let destStartDist = 0;
+      for (let j = 1; j <= startIdx; j++) {
+        destStartDist += Math.hypot(combined[j][0] - combined[j-1][0], combined[j][1] - combined[j-1][1]);
+      }
       const destShape = positions[destTrack] && Array.isArray(positions[destTrack].shape) ? positions[destTrack].shape : null;
-      const fullTrackLen = destShape ? polylineLength(destShape) : segLen;
-      const maxDist = lastSeg.startDist + frontFrac * fullTrackLen;
       const totalLen = polylineLength(combined);
+      const fullTrackLen = destShape ? polylineLength(destShape) : (totalLen - destStartDist);
+      const maxDist = destStartDist + frontFrac * fullTrackLen;
       if (totalLen > 0 && maxDist < totalLen) {
-        const frac = maxDist / totalLen;
-        const truncated = subPolyline(combined, 0, frac);
+        const truncated = subPolyline(combined, 0, maxDist / totalLen);
         if (truncated.length >= 2) {
           combined.length = 0;
           combined.push.apply(combined, truncated);
-          lastSeg.endDist = maxDist;
         }
       }
     }
@@ -361,14 +364,7 @@ function cancelMoveAnim() {
   });
   document.querySelectorAll('#train-layer [data-move-anim]').forEach(el => el.remove());
   document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
-  document.querySelectorAll('#edges-layer line[data-move-hl]').forEach(el => {
-    el.setAttribute('stroke','var(--yard-edge)'); el.setAttribute('stroke-width','1.5');
-    el.removeAttribute('data-move-hl');
-  });
-  document.querySelectorAll('#nodes-layer .t-node[data-move-hl]').forEach(el => {
-    el.removeAttribute('data-move-hl');
-  });
-  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = []; _moveTrackSegs = [];
+  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = [];
 }
 
 function _moveMoveLoop() {
@@ -398,37 +394,6 @@ function _moveDrawFrame(t) {
   const color = trainColorMap[train] || '#888';
   const easeT = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
   const frontDist = easeT * _moveTotalLen;
-
-  // Draw trail (colored line along path up to front)
-  let trailAcc = 0;
-  for (let i = 1; i < _movePath.length; i++) {
-    const a = _movePath[i-1], b = _movePath[i];
-    const segLen = Math.hypot(b[0]-a[0], b[1]-a[1]);
-    if (segLen <= 0) { trailAcc += segLen; continue; }
-    if (trailAcc + segLen <= frontDist) {
-      const trail = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      trail.setAttribute('x1', toSvgX(a[0])); trail.setAttribute('y1', toSvgY(a[1]));
-      trail.setAttribute('x2', toSvgX(b[0])); trail.setAttribute('y2', toSvgY(b[1]));
-      trail.setAttribute('stroke', color); trail.setAttribute('stroke-width', svgTrackWActive);
-      trail.setAttribute('stroke-linecap', 'round');
-      trail.setAttribute('style', 'pointer-events:none;opacity:0.4');
-      trail.setAttribute('data-move-anim','1');
-      layer.appendChild(trail);
-    } else {
-      const frac = Math.min(1, (frontDist - trailAcc) / segLen);
-      const trail = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      trail.setAttribute('x1', toSvgX(a[0])); trail.setAttribute('y1', toSvgY(a[1]));
-      trail.setAttribute('x2', toSvgX(a[0]+(b[0]-a[0])*frac));
-      trail.setAttribute('y2', toSvgY(a[1]+(b[1]-a[1])*frac));
-      trail.setAttribute('stroke', color); trail.setAttribute('stroke-width', svgTrackWActive);
-      trail.setAttribute('stroke-linecap', 'round');
-      trail.setAttribute('style', 'pointer-events:none;opacity:0.4');
-      trail.setAttribute('data-move-anim','1');
-      layer.appendChild(trail);
-      break;
-    }
-    trailAcc += segLen;
-  }
 
   // Draw train sprites: fixed natural size, only position + rotation change
   if (_moveUnits.length > 0) {
@@ -1030,17 +995,6 @@ function edgeSideOf(trackId, neighborId) {
   return null;
 }
 
-// Fraction span a train occupies on trackId when parked flush against `side`,
-// clamped to the parkable range.
-function parkedSpan(trackId, train, side) {
-  const ratio = trainRatio(train, trackId);
-  const pr = parkableRanges[trackId];
-  const lo = pr ? pr.startFrac : 0;
-  const hi = pr ? pr.endFrac : 1;
-  const span = hi - lo;
-  return side === 'a' ? [lo, Math.min(hi, lo + ratio * span)] : [Math.max(lo, hi - ratio * span), hi];
-}
-
 function updateYard(state, prevState) {
   if(!hasPositions) return;
   document.querySelectorAll('#edges-layer line').forEach(l => {
@@ -1069,99 +1023,26 @@ function updateYard(state, prevState) {
     const info=state.trains[train];
     if(!info||!info.track||(info.status==='departed'&&state.action_type!=='depart')||info.status==='absorbed') return;
     const color=trainColorMap[train];
-    const trainPath = state.train_path && state.train_path[train];
-    if (trainPath && trainPath.length >= 2 && !(_movePath && _moveState && _moveState.train === train)) {
-      const srcTrack = prevState && prevState.trains[train] ? prevState.trains[train].track : null;
-      for (let i = 0; i < trainPath.length; i++) {
-        const tid = trainPath[i];
-        const pos = positions[tid];
-        const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
-        const pn = document.getElementById('node-'+tid.replace(/[^a-zA-Z0-9]/g,'_'));
-        const isLast = i === trainPath.length - 1;
-        if (shape) {
-          // Light only the span the train occupies or travels: parked flush at
-          // one end, extended to the connection it enters/exits through. If it
-          // crosses the whole track (entry/exit on opposite ends), light it all.
-          let fStart = 0, fEnd = 1;
-          if (i === 0 && tid === srcTrack) {
-            const parked = (prevState.trains[train] && prevState.trains[train].restSide) || 'b';
-            const exit = edgeSideOf(tid, trainPath[1]);
-            if (exit === parked) { const sp = parkedSpan(tid, train, parked); fStart = sp[0]; fEnd = sp[1]; }
-          } else if (isLast) {
-            const entry = edgeSideOf(tid, trainPath[i-1]);
-            let nearFracs = null;
-            Object.keys(state.trains).forEach(t => {
-              if (t === train) return;
-              const ti = state.trains[t];
-              if (!ti || ti.track !== tid || ti.status === 'departed' || ti.status === 'absorbed') return;
-              const tf = trainFractionsOnTrack(t, tid, state);
-              if (!tf) return;
-              if (entry === 'b') {
-                if (!nearFracs || tf[1] > nearFracs[1]) nearFracs = tf;
-              } else {
-                if (!nearFracs || tf[0] < nearFracs[0]) nearFracs = tf;
-              }
-            });
-            if (nearFracs) {
-              if (entry === 'b') { fStart = nearFracs[1]; fEnd = 1; } else { fStart = 0; fEnd = nearFracs[0]; }
-            } else {
-              const fracs = trainFractionsOnTrack(train, tid, state);
-              if (fracs) {
-                if (entry === 'b') { fStart = fracs[0]; fEnd = 1; } else { fStart = 0; fEnd = fracs[1]; }
-              } else {
-                const parked = (info && info.restSide) || 'b';
-                const sp = parkedSpan(tid, train, parked);
-                if (entry === 'b') { fStart = sp[0]; fEnd = 1; } else { fStart = 0; fEnd = sp[1]; }
-              }
-            }
-          }
-          drawTrainSegment(tid, fStart, fEnd, color, isLast ? svgTrackWActive : svgTrackWPrev);
-        } else if (pn) {
-          pn.setAttribute('fill', color);
-          pn.setAttribute('r', isLast ? svgNodeRActive : svgNodeRPrev);
-        }
-        if (i < trainPath.length - 1) {
-          const a = trainPath[i], b = trainPath[i+1];
-          document.querySelectorAll('#edges-layer line').forEach(l => {
-            const ls = l.getAttribute('data-source'), lt = l.getAttribute('data-target');
-            if ((ls === a && lt === b) || (ls === b && lt === a)) {
-              l.setAttribute('stroke', color); l.setAttribute('stroke-width', '3');
-            }
-          });
-        }
-      }
-    }
-    if(prevState) {
-      const prev=prevState.trains[train];
-      if(prev&&prev.track&&prev.track!==info.track) {
-        const src=prev.track,tgt=info.track;
-        const srcInPath = trainPath && trainPath.length >= 2 && trainPath[0] === src;
-        document.querySelectorAll('#edges-layer line').forEach(l => {
-          const ls=l.getAttribute('data-source'),lt=l.getAttribute('data-target');
-          if((ls===src&&lt===tgt)||(ls===tgt&&lt===src)) {
-            l.setAttribute('stroke',color); l.setAttribute('stroke-width','3');
-          }
-        });
-        if(!srcInPath) {
-          const spos=positions[src];
-          const sshape=spos&&Array.isArray(spos.shape)&&spos.shape.length>=2?spos.shape:null;
-          if(sshape) {
-            const parked=(prev.restSide)||'b';
-            const exitNeighbor=(trainPath&&trainPath.length>=2)?trainPath[0]:tgt;
-            const exit=edgeSideOf(src,exitNeighbor);
-            let fStart=0,fEnd=1;
-            if(exit===parked){ const sp=parkedSpan(src,train,parked); fStart=sp[0]; fEnd=sp[1]; }
-            else{ const sp=parkedSpan(src,train,parked); if(exit==='b'){ fStart=sp[1]; fEnd=1; }else{ fStart=0; fEnd=sp[0]; } }
-            drawTrainSegment(src,fStart,fEnd,color,svgTrackWPrev);
-          } else {
-            const pn=document.getElementById('node-'+src.replace(/[^a-zA-Z0-9]/g,'_'));
-            if(pn&&(pn.getAttribute('fill')==='var(--yard-node)'||pn.getAttribute('stroke')==='var(--yard-node)')) {
-              pn.setAttribute('fill',color); pn.setAttribute('r',svgNodeRPrev);
-            }
-          }
-        }
-      }
-    }
+    if (_movePath && _moveState && _moveState.train === train) return;
+    // One continuous polyline for the whole travelled route: buildMovePath already
+    // resolves entry/exit sides, concatenates track shapes through switches and
+    // truncates the tail at the train's final position, so the highlight follows
+    // the same geometry as the movement animation instead of per-track spans
+    // stitched together with straight connector lines.
+    const route = state.train_path && state.train_path[train]
+      ? buildMovePath(train, state, prevState)
+      : null;
+    if (!route || route.length < 2) return;
+    const poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+    poly.setAttribute('points',route.map(p=>toSvgX(p[0])+','+toSvgY(p[1])).join(' '));
+    poly.setAttribute('fill','none');
+    poly.setAttribute('stroke',color);
+    poly.setAttribute('stroke-width',svgTrackWActive);
+    poly.setAttribute('stroke-linejoin','round');
+    poly.setAttribute('stroke-linecap','round');
+    poly.setAttribute('style','pointer-events:none');
+    poly.setAttribute('data-route',train);
+    document.getElementById('train-layer').appendChild(poly);
   });
 
   // Trains on tracks: draw proportional-length segments along track shapes.
