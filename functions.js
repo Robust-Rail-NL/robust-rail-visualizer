@@ -360,12 +360,13 @@ function pointOnPath(polyline, dist) {
   };
 }
 
+let _moveClipPct = 0;
+let _moveSpriteWidths = [];
+
 function startMoveAnim(state, prevState) {
   cancelMoveAnim();
   const train = state.train;
   if (!train) return;
-  // Build from the train's true parked tail so sprites start where the train
-  // actually stands (mid-track parking included), not at a flush-parking guess.
   const path = buildMovePath(train, state, prevState, true);
   if (!path || path.length < 2) return;
   _movePath = path;
@@ -374,6 +375,7 @@ function startMoveAnim(state, prevState) {
   _moveFrontOff = Math.min(_movePathFrontOffset, _moveTotalLen * 0.9);
   _moveState = state;
   _movePrevState = prevState;
+  
   const units = data.trainUnits ? data.trainUnits[train] : null;
   if (units && units.length) {
     _moveUnits = units.map(u => {
@@ -382,6 +384,44 @@ function startMoveAnim(state, prevState) {
   } else {
     _moveUnits = [];
   }
+  
+  // ---- CALCULATE CONSTANT CLIP PERCENTAGES ----
+  _moveSpriteWidths = [];
+  _moveClipPct = 0;
+  
+  if (_moveUnits.length > 0) {
+    let unitOffset = 0;
+    _moveUnits.forEach((u) => {
+      const natW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
+      
+      // Calculate the path segment this sprite occupies (at the START of animation)
+      // Using t=0 (start position)
+      const frontD = Math.min(_moveFrontOff, _moveTotalLen);
+      const backD = Math.max(0, frontD - natW);
+      
+      // Get the actual path segment for this sprite
+      const startFrac = Math.max(0, backD / _moveTotalLen);
+      const endFrac = Math.min(1, frontD / _moveTotalLen);
+      const pathSegment = subPolyline(_movePath, startFrac, endFrac);
+      
+      let clipPct = 0;
+      if (pathSegment.length >= 2) {
+        // Calculate the length of this segment in SVG coordinates
+        const svgPts = pathSegment.map(p => [toSvgX(p[0]), toSvgY(p[1])]);
+        const segLen = polylineLength(svgPts);
+        // If the segment is shorter than the sprite width, clip it
+        clipPct = Math.max(0, (1 - segLen / natW) * 100);
+      }
+      
+      _moveSpriteWidths.push({
+        natW: natW,
+        clipPct: clipPct
+      });
+      
+      unitOffset += natW;
+    });
+  }
+  
   // Constant speed: 300 px/s, clamped 300ms - 5000ms
   _moveDuration = Math.max(300, Math.min(5000, (_moveTotalLen / 300) * 1000));
   const trainEls = document.querySelectorAll('#train-layer [data-train="'+train+'"]');
@@ -397,7 +437,10 @@ function cancelMoveAnim() {
   });
   document.querySelectorAll('#train-layer [data-move-anim]').forEach(el => el.remove());
   document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
-  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = []; _moveFrontOff = 0;
+  _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = []; 
+  _moveFrontOff = 0;
+  _moveSpriteWidths = []; // Reset sprite widths
+  _moveClipPct = 0; // Reset clip percentage
 }
 
 function _moveMoveLoop() {
@@ -421,20 +464,20 @@ function _moveDrawFrame(t) {
   if (!_movePath || !_moveState) return;
   const layer = document.getElementById('train-layer');
   layer.querySelectorAll('[data-move-anim]').forEach(el => el.remove());
-  // Remove stale animation clipPaths so they are recreated at the current position
-  document.getElementById('yard-svg').querySelectorAll('clipPath[id^="mc-"]').forEach(cp => cp.remove());
+  
   const train = _moveState.train;
   const color = trainColorMap[train] || '#888';
   const easeT = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
-  // The path starts at the train's rear, so the nose begins _moveFrontOff into
-  // the path (its true parked position) and travels the remainder.
   const frontDist = _moveFrontOff + easeT * (_moveTotalLen - _moveFrontOff);
 
-  // Draw train sprites: fixed natural size, only position + rotation change
+  // Draw train sprites with constant clipping
   if (_moveUnits.length > 0) {
     let unitOffset = 0;
-    _moveUnits.forEach(u => {
-      const natW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
+    _moveUnits.forEach((u, unitIndex) => {
+      const spriteInfo = _moveSpriteWidths[unitIndex] || { natW: TRAIN_H / 0.25, clipPct: 0 };
+      const natW = spriteInfo.natW;
+      const clipPct = spriteInfo.clipPct; // Use the constant clip percentage
+      
       const frontD = Math.max(0, frontDist - unitOffset);
       const backD = Math.max(0, frontD - natW);
       const midD = (frontD + backD) / 2;
@@ -444,6 +487,7 @@ function _moveDrawFrame(t) {
       let deg = pm.angle;
       if (deg > 90) deg -= 180;
       else if (deg < -90) deg += 180;
+      
       if (u.img) {
         const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         el.setAttribute('href', u.img.uri);
@@ -452,7 +496,16 @@ function _moveDrawFrame(t) {
         el.setAttribute('width', natW);
         el.setAttribute('height', TRAIN_H);
         el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
-        el.setAttribute('style', 'pointer-events:none');
+        
+        // Apply the constant clip percentage (same throughout animation)
+        if (clipPct > 0) {
+          el.setAttribute('style', 
+            `pointer-events:none; clip-path: polygon(${clipPct}% 0, 100% 0, 100% 100%, ${clipPct}% 100%)`
+          );
+        } else {
+          el.setAttribute('style', 'pointer-events:none');
+        }
+        
         if (train) el.setAttribute('data-train', train);
         el.setAttribute('data-move-anim','1');
         layer.appendChild(el);
@@ -460,6 +513,7 @@ function _moveDrawFrame(t) {
       unitOffset += natW;
     });
   } else {
+    // Fallback for trains without unit images
     const midDist = Math.max(0, frontDist - TRAIN_H);
     const pm = pointOnPath(_movePath, midDist);
     const cx = toSvgX(pm.x);
