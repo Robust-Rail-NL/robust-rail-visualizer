@@ -413,14 +413,20 @@ function startMoveAnim(state, prevState) {
           const dLow = (_moveSrcRev ? _moveSrcSpan[1] - nextF : curF - _moveSrcSpan[0]) * shapeLen;
           const dHigh = (_moveSrcRev ? _moveSrcSpan[1] - curF : nextF - _moveSrcSpan[0]) * shapeLen;
           let clipPct = 0;
+          // Parked-style image offset: nose edge flush with the span's far
+          // end (imgX = spanLen/2 - natW), so clipped sprites show exactly
+          // the same slice as when parked.
+          let imgX = -natW / 2;
           const seg = subPolyline(_movePath, Math.max(0, dLow) / _moveTotalLen, Math.min(1, dHigh / _moveTotalLen));
           if (seg.length >= 2) {
             const svgPts = seg.map(p => [toSvgX(p[0]), toSvgY(p[1])]);
-            clipPct = Math.max(0, (1 - polylineLength(svgPts) / natW) * 100);
+            const L = polylineLength(svgPts);
+            clipPct = Math.max(0, (1 - L / natW) * 100);
+            imgX = L / 2 - natW;
           }
           // Frozen facing: the parked chord angle for this member's own span,
           // so reverse-exit moves translate the image instead of flipping it.
-          _moveUnitSpans.push({ mid: (dLow + dHigh) / 2, natW: natW, clipPct: clipPct, angle: segAngle(subPolyline(srcShape, curF, nextF)) });
+          _moveUnitSpans.push({ mid: (dLow + dHigh) / 2, natW: natW, clipPct: clipPct, angle: segAngle(subPolyline(srcShape, curF, nextF)), imgX: imgX });
         } else {
           _moveUnitSpans.push(null);
         }
@@ -435,15 +441,18 @@ function startMoveAnim(state, prevState) {
         const backD = Math.max(0, frontD - natW);
         let clipPct = 0;
         let angle = 0;
+        let imgX = -natW / 2;
         const seg = subPolyline(_movePath, backD / _moveTotalLen, frontD / _moveTotalLen);
         if (seg.length >= 2) {
           const svgPts = seg.map(p => [toSvgX(p[0]), toSvgY(p[1])]);
-          clipPct = Math.max(0, (1 - polylineLength(svgPts) / natW) * 100);
+          const L = polylineLength(svgPts);
+          clipPct = Math.max(0, (1 - L / natW) * 100);
+          imgX = L / 2 - natW;
           angle = pointOnPath(_movePath, (frontD + backD) / 2).angle;
           if (angle > 90) angle -= 180;
           else if (angle < -90) angle += 180;
         }
-        _moveUnitSpans.push({ mid: (backD + frontD) / 2, natW: natW, clipPct: clipPct, angle: angle });
+        _moveUnitSpans.push({ mid: (backD + frontD) / 2, natW: natW, clipPct: clipPct, angle: angle, imgX: imgX });
         off += natW;
       });
     }
@@ -508,13 +517,25 @@ function _moveDrawFrame(t) {
       const pm = pointOnPath(_movePath, s.mid + shift);
       const cx = toSvgX(pm.x);
       const cy = toSvgY(pm.y);
+      // Each member follows the path tangent at its own position. The tangent
+      // is unwrapped against the angle rendered in the PREVIOUS frame (parked
+      // facing for the first frame), so members turn continuously through
+      // curves and never mirror 180°.
+      let deg = pm.angle;
+      const ref = (s.lastDeg == null) ? s.angle : s.lastDeg;
+      while (deg - ref > 90) deg -= 180;
+      while (deg - ref < -90) deg += 180;
+      s.lastDeg = deg;
       const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
       el.setAttribute('href', u.img.uri);
-      el.setAttribute('x', -s.natW / 2);
+      // Parked-style offset: the visible (post-clip) part of the image sits
+      // exactly where it does when parked, so the span midpoint doubles as a
+      // stable pivot for clipped sprites while they turn.
+      el.setAttribute('x', s.imgX);
       el.setAttribute('y', -TRAIN_H);
       el.setAttribute('width', s.natW);
       el.setAttribute('height', TRAIN_H);
-      el.setAttribute('transform', `translate(${cx},${cy}) rotate(${s.angle})`);
+      el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
       el.setAttribute('style', s.clipPct > 0
         ? `pointer-events:none; clip-path: polygon(${s.clipPct}% 0, 100% 0, 100% 100%, ${s.clipPct}% 100%)`
         : 'pointer-events:none');
