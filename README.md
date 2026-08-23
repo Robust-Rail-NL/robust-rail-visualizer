@@ -134,7 +134,7 @@ Create or edit the track layout files that control how tracks appear on the yard
 python layout_editor.py --location-name Location_KleineBinckhorst --port 8766
 ```
 
-Open http://127.0.0.1:8766 in a browser. Click tracks on the diagram to position them, or use the JSON editor to set coordinates directly. Layouts are saved to the `layouts/` directory.
+Open http://127.0.0.1:8766 in a browser. Click tracks on the diagram to position them, or use the JSON editor to set coordinates directly. For rail tracks you can draw a `shape` polyline along the track and mark the parkable stretch: enable **Set parking** and click twice on the rail (start, then end), then drag the orange handles to fine-tune. Layouts are saved to the `layouts/` directory.
 
 Options:
 
@@ -150,6 +150,7 @@ Layout files (`layouts/*.json`) define the visual positions of tracks on the yar
 
 - `x`, `y` — center point coordinates
 - `shape` — array of `[x, y]` points defining the track polyline (for rendering)
+- `parking` — optional `[startFrac, endFrac]` limiting where trains may park on that track, as fractions of the polyline length measured from the shape's start (the A-side end). When absent, the whole polyline is parkable. Set it from the layout editor with **Set parking** (green highlight shows the parkable stretch).
 
 Tracks without entries in the layout file are still functional but will not be drawn on the yard diagram.
 

@@ -63,10 +63,13 @@ function loadFunctions(dataFile) {
   getPath: () => _movePath,
   // Exact expected pivot (svg coords) for member i at anim fraction t,
   // using the same quadratic ease and arc offset as _moveDrawFrame.
+  // Frame 0 reproduces the parked sprite's chord midpoint exactly; later
+  // frames ride the path arc.
   expectedPos: (i, t) => {
     const e = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
     const s = _moveUnitSpans[i];
     if (!s || !_movePath) return null;
+    if (t === 0 && s.pivot0) return { x: s.pivot0.x, y: s.pivot0.y };
     const pm = pointOnPath(_movePath, s.mid + e * (_moveTotalLen - _moveFrontOff));
     return { x: toSvgX(pm.x), y: toSvgY(pm.y) };
   }

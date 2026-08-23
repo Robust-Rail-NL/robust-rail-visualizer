@@ -370,6 +370,25 @@ function pointOnPath(polyline, dist) {
   };
 }
 
+// Arc distance from the start of the polyline to the projection of point p.
+// Used to anchor a sprite's ride position at its chord midpoint, which can sit
+// slightly off the rails when its slice crosses shape vertices.
+function projectDistanceOnPath(polyline, p) {
+  if (!polyline || polyline.length < 2) return 0;
+  let best = null, acc = 0;
+  for (let i = 1; i < polyline.length; i++) {
+    const a = polyline[i-1], b = polyline[i];
+    const seg = Math.hypot(b[0]-a[0], b[1]-a[1]);
+    if (seg <= 0) continue;
+    const tt = Math.max(0, Math.min(1, ((p.x-a[0])*(b[0]-a[0]) + (p.y-a[1])*(b[1]-a[1])) / (seg*seg)));
+    const cx = a[0] + (b[0]-a[0])*tt, cy = a[1] + (b[1]-a[1])*tt;
+    const dd = Math.hypot(p.x-cx, p.y-cy);
+    if (!best || dd < best.d) best = { d: dd, dist: acc + seg*tt };
+    acc += seg;
+  }
+  return best ? best.dist : 0;
+}
+
 function startMoveAnim(state, prevState) {
   cancelMoveAnim();
   const train = state.train;
@@ -426,7 +445,23 @@ function startMoveAnim(state, prevState) {
           }
           // Frozen facing: the parked chord angle for this member's own span,
           // so reverse-exit moves translate the image instead of flipping it.
-          _moveUnitSpans.push({ mid: (dLow + dHigh) / 2, natW: natW, clipPct: clipPct, angle: segAngle(subPolyline(srcShape, curF, nextF)), imgX: imgX });
+          const chordAngle = segAngle(subPolyline(srcShape, curF, nextF));
+          // Ride anchor + exact t=0 pivot: a slice may cross shape vertices
+          // (full-track parking), where chord midpoint != arc midpoint.  The
+          // member rides the path from the arc projection of its chord
+          // midpoint, and reproduces the parked sprite pixel-exactly at t=0.
+          let mid = (dLow + dHigh) / 2;
+          let pivot0 = null;
+          const slice = subPolyline(srcShape, curF, nextF);
+          if (slice.length >= 2) {
+            const cm = {
+              x: (slice[0][0] + slice[slice.length - 1][0]) / 2,
+              y: (slice[0][1] + slice[slice.length - 1][1]) / 2,
+            };
+            pivot0 = { x: toSvgX(cm.x), y: toSvgY(cm.y) };
+            mid = projectDistanceOnPath(_movePath, cm);
+          }
+          _moveUnitSpans.push({ mid: mid, natW: natW, clipPct: clipPct, angle: chordAngle, imgX: imgX, pivot0: pivot0 });
         } else {
           _moveUnitSpans.push(null);
         }
@@ -514,14 +549,18 @@ function _moveDrawFrame(t) {
     _moveUnits.forEach((u, unitIndex) => {
       const s = _moveUnitSpans[unitIndex];
       if (!s || !u.img) return;
+      // Frame 0 reproduces the parked sprite exactly (chord midpoint and
+      // facing), so starting a move never shifts the train; afterwards the
+      // member rides the path tangent at its own position.
+      const firstFrame = t === 0;
       const pm = pointOnPath(_movePath, s.mid + shift);
-      const cx = toSvgX(pm.x);
-      const cy = toSvgY(pm.y);
+      const cx = (firstFrame && s.pivot0) ? s.pivot0.x : toSvgX(pm.x);
+      const cy = (firstFrame && s.pivot0) ? s.pivot0.y : toSvgY(pm.y);
       // Each member follows the path tangent at its own position. The tangent
       // is unwrapped against the angle rendered in the PREVIOUS frame (parked
       // facing for the first frame), so members turn continuously through
       // curves and never mirror 180°.
-      let deg = pm.angle;
+      let deg = firstFrame ? s.angle : pm.angle;
       const ref = (s.lastDeg == null) ? s.angle : s.lastDeg;
       while (deg - ref > 90) deg -= 180;
       while (deg - ref < -90) deg += 180;
@@ -930,62 +969,30 @@ function subPolyline(shape, fStart, fEnd) {
 }
 
 // ---- PARKABLE RANGES & GLOBAL SCALE ----
-// For each track with a shape, find the longest straight sub-segment where
-// consecutive turning angles stay below 10 degrees.  Trains may only park
-// within this straight portion.
+// Where trains may park on each track: a [startFrac, endFrac] window of the
+// polyline, measured from the A-side end (shape start).  A track can override
+// it in the layout file with "parking": [s, e]; anything missing or invalid
+// means the whole shape is parkable.
 const parkableRanges = {};
 (function computeParkableRanges() {
-  const ANGLE_THRESH = 10; // degrees
   Object.keys(positions).forEach(tid => {
     const pos = positions[tid];
     const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
     if (!shape) { parkableRanges[tid] = null; return; }
     const total = polylineLength(shape);
-    if (total <= 0) { parkableRanges[tid] = null; return; }
-    // Find the longest straight sub-segment by walking with a sliding window
-    let bestStart = 0, bestEnd = 1, bestLen = 0;
-    let segStart = 0;
-    for (let i = 2; i < shape.length; i++) {
-      const ax = shape[i-2][0], ay = shape[i-2][1];
-      const bx = shape[i-1][0], by = shape[i-1][1];
-      const cx = shape[i][0], cy = shape[i][1];
-      const a1 = Math.atan2(by - ay, bx - ax);
-      const a2 = Math.atan2(cy - by, cx - bx);
-      let diff = (a2 - a1) * 180 / Math.PI;
-      while (diff > 180) diff -= 360;
-      while (diff < -180) diff += 360;
-      if (Math.abs(diff) > ANGLE_THRESH) {
-        // Straight segment ended at point i-1
-        const segLen = 0; // recalc from segStart to i-1
-        let accD = 0;
-        for (let j = segStart + 1; j <= i - 1; j++) {
-          accD += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
-        }
-        if (accD > bestLen) { bestLen = accD; bestStart = segStart; bestEnd = i - 1; }
-        segStart = i - 1;
-      }
-    }
-    // Check the final segment
-    {
-      let accD = 0;
-      for (let j = segStart + 1; j < shape.length; j++) {
-        accD += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
-      }
-      if (accD > bestLen) { bestLen = accD; bestStart = segStart; bestEnd = shape.length - 1; }
-    }
-    // Convert point indices to fractions
-    let dStart = 0;
-    for (let j = 1; j <= bestStart; j++) {
-      dStart += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
-    }
-    let dEnd = dStart;
-    for (let j = bestStart + 1; j <= bestEnd; j++) {
-      dEnd += Math.hypot(shape[j][0] - shape[j-1][0], shape[j][1] - shape[j-1][1]);
+    if (!(total > 0)) { parkableRanges[tid] = null; return; }
+    let startFrac = 0, endFrac = 1;
+    const pk = pos.parking;
+    if (Array.isArray(pk) && pk.length === 2 &&
+        Number.isFinite(+pk[0]) && Number.isFinite(+pk[1])) {
+      startFrac = Math.min(1, Math.max(0, +pk[0]));
+      endFrac = Math.min(1, Math.max(0, +pk[1]));
+      if (!(endFrac > startFrac)) { startFrac = 0; endFrac = 1; }
     }
     parkableRanges[tid] = {
-      startFrac: total > 0 ? dStart / total : 0,
-      endFrac: total > 0 ? dEnd / total : 1,
-      pixelLength: bestLen
+      startFrac,
+      endFrac,
+      pixelLength: polylineLength(subPolyline(shape, startFrac, endFrac)),
     };
   });
 })();

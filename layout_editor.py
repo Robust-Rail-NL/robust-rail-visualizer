@@ -83,6 +83,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     entry["size"] = t["size"]
                 if t.get("shape") and len(t["shape"]) >= 2:
                     entry["shape"] = [[int(round(px)), int(round(py))] for px, py in t["shape"]]
+                if t.get("parking"):
+                    entry["parking"] = t["parking"]
                 out[str(tid)] = entry
             current["tracks"] = out
             with open(layout_path, "w", encoding="utf-8") as f:
@@ -150,6 +152,8 @@ def build_editor_data(location_path, layout_path, location_name):
                 entry["size"] = lay["size"]
             if lay.get("shape") and len(lay["shape"]) >= 2:
                 entry["shape"] = [[float(px), float(py)] for px, py in lay["shape"]]
+            if lay.get("parking"):
+                entry["parking"] = lay["parking"]
         all_tracks.append(entry)
 
     # build oriented edges from aSide/bSide references
@@ -307,6 +311,8 @@ body { font-family: system-ui, sans-serif; background: #1a1d23; color: #e2e8f8; 
 .vertex-handle { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: #3b82f6; border: 2px solid #93c5fd; transform: translate(-50%, -50%); cursor: move; pointer-events: auto; z-index: 20; }
 .vertex-handle.vertex-end { width: 15px; height: 15px; background: #f59e0b; border-color: #fde68a; }
 .vertex-handle:hover { transform: translate(-50%, -50%) scale(1.3); }
+.park-handle { position: absolute; width: 14px; height: 14px; background: #f59e0b; border: 2px solid #7c2d12; transform: translate(-50%, -50%) rotate(45deg); cursor: ew-resize; pointer-events: auto; z-index: 25; }
+.park-handle:hover { transform: translate(-50%, -50%) rotate(45deg) scale(1.3); }
 </style>
 </head>
 <body>
@@ -332,7 +338,12 @@ body { font-family: system-ui, sans-serif; background: #1a1d23; color: #e2e8f8; 
       <button id="btn-shape-flip">Flip A/B</button>
       <button id="btn-shape-clear">Clear shape</button>
     </div>
+    <div class="shape-row" id="park-row">
+      <button id="btn-park-mode">Set parking: off</button>
+      <button id="btn-park-clear">Clear parking</button>
+    </div>
     <div class="shape-hint">Edit shape on: click the image to add points along the rail. Drag the blue/yellow handles to move points. A = start (a-side), B = end (b-side); connections follow the dashed lines.</div>
+    <div class="shape-hint" id="park-hint"></div>
   </div>
   <div id="track-list"></div>
   <div class="actions">
@@ -359,6 +370,8 @@ let imgW = 0, imgH = 0;
 let dirty = false;
 let shapeMode = false;
 let activeVertex = null;
+let parkMode = false;
+let parkClicks = 0;
 
 const imgEl = document.getElementById('yard-image');
 const overlay = document.getElementById('overlay');
@@ -383,6 +396,70 @@ function syncXY(t) {
   const m = shapeMid(t);
   if (m) { t.x = Math.round(m[0]); t.y = Math.round(m[1]); }
 }
+function parkingValid(t) {
+  return !!(t && Array.isArray(t.parking) && t.parking.length === 2 &&
+    isFinite(+t.parking[0]) && isFinite(+t.parking[1]) && +t.parking[1] > +t.parking[0]);
+}
+function shapeLength(shape) {
+  let total = 0;
+  for (let i = 1; i < shape.length; i++) {
+    total += Math.hypot(shape[i][0] - shape[i-1][0], shape[i][1] - shape[i-1][1]);
+  }
+  return total;
+}
+function pointAt(shape, frac) {
+  const total = shapeLength(shape);
+  if (!(total > 0)) return [shape[0][0], shape[0][1]];
+  let d = Math.min(1, Math.max(0, frac)) * total;
+  for (let i = 1; i < shape.length; i++) {
+    const L = Math.hypot(shape[i][0] - shape[i-1][0], shape[i][1] - shape[i-1][1]);
+    if (d <= L || i === shape.length - 1) {
+      const f = L > 0 ? Math.min(1, d / L) : 0;
+      return [shape[i-1][0] + (shape[i][0] - shape[i-1][0]) * f,
+              shape[i-1][1] + (shape[i][1] - shape[i-1][1]) * f];
+    }
+    d -= L;
+  }
+  const last = shape[shape.length - 1];
+  return [last[0], last[1]];
+}
+function projectOnShape(shape, x, y) {
+  if (!shape || shape.length < 2) return null;
+  const total = shapeLength(shape);
+  if (!(total > 0)) return null;
+  let best = null, acc = 0;
+  for (let i = 0; i < shape.length - 1; i++) {
+    const ax = shape[i][0], ay = shape[i][1];
+    const bx = shape[i+1][0], by = shape[i+1][1];
+    const segLen = Math.hypot(bx - ax, by - ay);
+    const L2 = segLen * segLen;
+    const tt = L2 > 0 ? ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2 : 0;
+    const cl = Math.max(0, Math.min(1, tt));
+    const cx = ax + (bx - ax) * cl, cy = ay + (by - ay) * cl;
+    const dd = Math.hypot(x - cx, y - cy);
+    if (!best || dd < best.d) best = { d: dd, frac: (acc + segLen * cl) / total };
+    acc += segLen;
+  }
+  return best.frac;
+}
+function subShape(shape, f0, f1) {
+  const out = [];
+  if (!(f1 > f0) || shape.length < 2) return out;
+  out.push(pointAt(shape, f0));
+  const total = shapeLength(shape);
+  let acc = 0;
+  for (let i = 1; i < shape.length - 1; i++) {
+    if (acc > f0 * total && acc < f1 * total) {
+      const lastP = out[out.length - 1];
+      if (Math.hypot(shape[i][0] - lastP[0], shape[i][1] - lastP[1]) > 0.5) {
+        out.push([shape[i][0], shape[i][1]]);
+      }
+    }
+    acc += Math.hypot(shape[i][0] - shape[i-1][0], shape[i][1] - shape[i-1][1]);
+  }
+  out.push(pointAt(shape, f1));
+  return out;
+}
 function portOf(t, side) {
   if (hasShape(t)) return side === 'a' ? t.shape[0] : t.shape[t.shape.length - 1];
   if (t.x !== undefined) return [t.x, t.y];
@@ -398,6 +475,7 @@ function redraw() {
   renderMarkers();
   drawEdges();
   renderVertices();
+  renderParkHandles();
 }
 
 document.getElementById('btn-labels').onclick = () => {
@@ -433,9 +511,21 @@ function updateShapeTools() {
   const modeBtn = document.getElementById('btn-shape-mode');
   modeBtn.textContent = 'Edit shape: ' + (shapeMode ? 'on' : 'off');
   modeBtn.classList.toggle('active', shapeMode);
+  modeBtn.disabled = parkMode;
   document.getElementById('btn-shape-undo').disabled = !shapeMode;
   document.getElementById('btn-shape-flip').disabled = !shapeMode || !hasShape(t);
   document.getElementById('btn-shape-clear').disabled = !shapeMode;
+  const canPark = hasShape(t);
+  const parkBtn = document.getElementById('btn-park-mode');
+  parkBtn.textContent = 'Set parking: ' + (parkMode ? 'on' : 'off');
+  parkBtn.classList.toggle('active', parkMode);
+  parkBtn.disabled = !canPark || shapeMode;
+  document.getElementById('btn-park-clear').disabled = !canPark || shapeMode || !parkingValid(t);
+  document.getElementById('park-hint').textContent = canPark ? parkHintText(t) : 'Parking ranges need a shape first.';
+}
+function parkHintText(t) {
+  if (!parkingValid(t)) return `${t.name}: whole rail is parkable (no override).`;
+  return `${t.name}: parkable from ${Math.round(+t.parking[0] * 100)}% to ${Math.round(+t.parking[1] * 100)}% of the rail, measured from A.`;
 }
 
 document.getElementById('btn-shape-mode').onclick = () => {
@@ -443,6 +533,7 @@ document.getElementById('btn-shape-mode').onclick = () => {
   shapeMode = !shapeMode;
   const t = tracks.find(x => x.id === selectedId);
   if (shapeMode && t && !t.shape) t.shape = [];
+  if (shapeMode && parkMode) parkMode = false;
   updateShapeTools();
   setStatus(shapeMode ? `Shape mode on — click along the rail of ${t.name} to add points.` : 'Shape mode off.');
   redraw();
@@ -483,6 +574,33 @@ document.getElementById('btn-shape-clear').onclick = () => {
   dirty = true;
   setStatus(`Cleared shape for ${t.name}.`);
   redraw();
+};
+
+document.getElementById('btn-park-mode').onclick = () => {
+  if (!selectedId) return;
+  const t = tracks.find(x => x.id === selectedId);
+  if (!t || !hasShape(t)) { setStatus('This track has no shape — draw one before setting parking.'); return; }
+  parkMode = !parkMode;
+  parkClicks = 0;
+  if (parkMode && shapeMode) shapeMode = false;
+  updateShapeTools();
+  setStatus(parkMode
+    ? `Parking mode on for ${t.name} — click twice along the rail: first click marks where parking starts, second where it ends.`
+    : `Parking mode off for ${t.name}.`);
+  redraw();
+};
+
+document.getElementById('btn-park-clear').onclick = () => {
+  const t = tracks.find(x => x.id === selectedId);
+  if (!t) return;
+  delete t.parking;
+  parkClicks = 0;
+  dirty = true;
+  setStatus(`Cleared parking override for ${t.name} — whole rail is parkable.`);
+  renderList();
+  drawEdges();
+  renderParkHandles();
+  updateShapeTools();
 };
 
 document.getElementById('btn-auto-seed').onclick = () => {
@@ -529,7 +647,8 @@ async function load() {
   }
   const positioned = tracks.filter(t => t.x !== undefined).length;
   const shaped = tracks.filter(t => hasShape(t)).length;
-  statusBar.textContent = `${tracks.length} tracks (${positioned} positioned, ${shaped} with shapes)`;
+  const parked = tracks.filter(t => parkingValid(t)).length;
+  statusBar.textContent = `${tracks.length} tracks (${positioned} positioned, ${shaped} with shapes, ${parked} with parking override)`;
 
   renderList();
   if (imgW && imgH) { redraw(); }
@@ -559,6 +678,7 @@ function renderList() {
       <span class="type">${t.type}</span>
       <span class="pos">${posText}</span>
       ${hasShape(t) ? `<span class="size-badge">shape</span>` : (t.size ? `<span class="size-badge">${t.size}</span>` : '')}
+      ${parkingValid(t) ? `<span class="size-badge">park ${Math.round(+t.parking[0] * 100)}-${Math.round(+t.parking[1] * 100)}%</span>` : ''}
     `;
     div.onclick = () => selectTrack(t.id);
     listEl.appendChild(div);
@@ -627,6 +747,22 @@ function drawEdges() {
     poly.setAttribute('stroke-linecap', 'round');
     poly.setAttribute('opacity', t.id === selectedId ? 1 : 0.5);
     edgeSvg.appendChild(poly);
+  });
+
+  tracks.forEach(t => {
+    if (!parkingValid(t)) return;
+    const sub = subShape(t.shape, +t.parking[0], +t.parking[1]);
+    if (sub.length < 2) return;
+    const pts = sub.map(p => (p[0] * scaleX) + ',' + (p[1] * scaleY)).join(' ');
+    const band = document.createElementNS(ns, 'polyline');
+    band.setAttribute('points', pts);
+    band.setAttribute('fill', 'none');
+    band.setAttribute('stroke', '#22c55e');
+    band.setAttribute('stroke-width', t.id === selectedId ? 12 : 9);
+    band.setAttribute('stroke-linecap', 'round');
+    band.setAttribute('stroke-linejoin', 'round');
+    band.setAttribute('opacity', t.id === selectedId ? 0.35 : 0.22);
+    edgeSvg.appendChild(band);
   });
 
   edges.forEach(e => {
@@ -712,15 +848,63 @@ function startVertexDrag(e, t, index) {
   document.addEventListener('mouseup', up);
 }
 
+function renderParkHandles() {
+  overlay.querySelectorAll('.park-handle').forEach(el => el.remove());
+  if (!parkMode) return;
+  const t = tracks.find(x => x.id === selectedId);
+  if (!t || !hasShape(t) || !parkingValid(t)) return;
+  const dispW = imgEl.offsetWidth, dispH = imgEl.offsetHeight;
+  if (!dispW || !dispH) return;
+  const scaleX = dispW / imgW, scaleY = dispH / imgH;
+  [0, 1].forEach(idx => {
+    const p = pointAt(t.shape, +t.parking[idx]);
+    const h = document.createElement('div');
+    h.className = 'park-handle';
+    h.style.left = (p[0] * scaleX) + 'px';
+    h.style.top = (p[1] * scaleY) + 'px';
+    h.title = (idx === 0 ? 'Parking start' : 'Parking end') + ' — drag to adjust';
+    h.onmousedown = (e2) => startParkDrag(e2, t, idx);
+    overlay.appendChild(h);
+  });
+}
+
+function startParkDrag(e, t, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = imgEl.getBoundingClientRect();
+  const move = (ev) => {
+    const x = (ev.clientX - rect.left) / rect.width * imgW;
+    const y = (ev.clientY - rect.top) / rect.height * imgH;
+    const frac = projectOnShape(t.shape, x, y);
+    if (frac === null) return;
+    const other = +t.parking[1 - idx];
+    const v = idx === 0 ? Math.min(frac, other - 0.01) : Math.max(frac, other + 0.01);
+    t.parking[idx] = Math.min(1, Math.max(0, v));
+    dirty = true;
+    drawEdges();
+    renderParkHandles();
+  };
+  const up = () => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+    setStatus(`${t.name} parking: ${Math.round(+t.parking[0] * 100)}%–${Math.round(+t.parking[1] * 100)}% from A.`);
+    renderList();
+    updateShapeTools();
+  };
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', up);
+}
+
 function selectTrack(id) {
   selectedId = id;
+  parkClicks = 0;
   const t = tracks.find(x => x.id === id);
   renderList();
   const items = listEl.querySelectorAll('.track-item');
   for (const item of items) {
     if (item.dataset.id === id) { item.scrollIntoView({ block: 'nearest' }); break; }
   }
-  if (t && hasShape(t)) {
+  if (t && hasShape(t) && !parkMode) {
     shapeMode = true;
     setStatus(`Selected ${t.name} (#${t.id}) — shape with ${t.shape.length} points. A = start (a-side), B = end (b-side). Click adds points, drag handles to move them.`);
   } else if (t && t.x !== undefined) {
@@ -743,6 +927,28 @@ imgEl.onclick = (e) => {
   const y = Math.round((e.clientY - rect.top) / rect.height * imgH);
   const t = tracks.find(x => x.id === selectedId);
   if (!t) return;
+  if (parkMode) {
+    if (!hasShape(t)) { setStatus(`${t.name} (#${t.id}) has no shape — cannot set parking.`); return; }
+    const frac = projectOnShape(t.shape, x, y);
+    if (frac === null) return;
+    if (parkClicks % 2 === 0) {
+      t.parking = [frac, Math.min(1, frac + 0.02)];
+      parkClicks++;
+      dirty = true;
+      setStatus(`${t.name}: parking starts at ${Math.round(frac * 100)}% — now click where the parkable stretch ends.`);
+    } else {
+      const s = Math.min(t.parking[0], frac), e2 = Math.max(t.parking[0], frac);
+      t.parking = [s, e2];
+      parkClicks++;
+      dirty = true;
+      setStatus(`${t.name}: parking set to ${Math.round(s * 100)}%–${Math.round(e2 * 100)}% from A. Drag the orange handles to fine-tune, or click twice again to redraw.`);
+      renderList();
+    }
+    drawEdges();
+    renderParkHandles();
+    updateShapeTools();
+    return;
+  }
   if (shapeMode) {
     if (!t.shape) t.shape = [];
     t.shape.push([x, y]);
@@ -774,6 +980,7 @@ document.getElementById('btn-save').onclick = async () => {
       const entry = { x: t.x, y: t.y, name: t.name || t.id };
       if (t.size) entry.size = t.size;
       if (hasShape(t)) entry.shape = t.shape.map(p => [Math.round(p[0]), Math.round(p[1])]);
+      if (parkingValid(t)) entry.parking = [+t.parking[0].toFixed(4), +t.parking[1].toFixed(4)];
       payload.tracks[t.id] = entry;
     }
   });
@@ -789,7 +996,8 @@ document.getElementById('btn-save').onclick = async () => {
     setTimeout(() => {
       const pos = tracks.filter(t => t.x !== undefined).length;
       const shaped = tracks.filter(t => hasShape(t)).length;
-      setStatus(`Saved — ${pos}/${tracks.length} tracks positioned, ${shaped} with shapes.`);
+      const parked = tracks.filter(t => parkingValid(t)).length;
+      setStatus(`Saved — ${pos}/${tracks.length} tracks positioned, ${shaped} with shapes, ${parked} with parking override.`);
     }, 1500);
   }
 };
@@ -798,6 +1006,8 @@ document.getElementById('btn-reload').onclick = () => {
   if (dirty && !confirm('Discard unsaved changes and reload from disk?')) return;
   selectedId = null;
   shapeMode = false;
+  parkMode = false;
+  parkClicks = 0;
   dirty = false;
   setStatus('Reloading from disk...');
   load();
@@ -810,9 +1020,12 @@ document.getElementById('btn-reset').onclick = () => {
     delete t.x;
     delete t.y;
     delete t.shape;
+    delete t.parking;
     shapeMode = false;
+    parkMode = false;
+    parkClicks = 0;
     dirty = true;
-    setStatus(`${t.name} (#${t.id}) position and shape cleared.`);
+    setStatus(`${t.name} (#${t.id}) position, shape and parking cleared.`);
     renderList();
     renderMarkers();
     drawEdges();

@@ -429,6 +429,21 @@
   },
   {
    "entryTrackPart": 42,
+   "firstParkingTrackPart": 8,
+   "arrival": 0,
+   "departure": 0,
+   "id": 5020,
+   "members": [
+    {
+     "typePrefix": "ICM",
+     "carriages": 4,
+     "id": 5118
+    }
+   ],
+   "standingIndex": null
+  },
+  {
+   "entryTrackPart": 42,
    "firstParkingTrackPart": 9,
    "arrival": 0,
    "departure": 0,

@@ -993,7 +993,7 @@ def main():
         else:
             tid = key
             name = name or key
-        positions[tid] = {"x": pos["x"], "y": pos["y"], "size": pos.get("size"), "name": name, "shape": pos.get("shape")}
+        positions[tid] = {"x": pos["x"], "y": pos["y"], "size": pos.get("size"), "name": name, "shape": pos.get("shape"), "parking": pos.get("parking")}
     layout["tracks"] = positions
 
     image_data_uri = None
