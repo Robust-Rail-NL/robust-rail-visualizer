@@ -1,0 +1,246 @@
+{
+ "schemaVersion": 1,
+ "actions": [
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5101,
+    "memberIDs": [
+     5101,
+     5102
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5103,
+    "memberIDs": [
+     5103
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5104,
+    "memberIDs": [
+     5104,
+     5105
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5106,
+    "memberIDs": [
+     5106
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5107,
+    "memberIDs": [
+     5107
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5108,
+    "memberIDs": [
+     5108,
+     5109
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5110,
+    "memberIDs": [
+     5110
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5111,
+    "memberIDs": [
+     5111
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5112,
+    "memberIDs": [
+     5112
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5113,
+    "memberIDs": [
+     5113
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5114,
+    "memberIDs": [
+     5114
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5115,
+    "memberIDs": [
+     5115
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5116,
+    "memberIDs": [
+     5116
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  },
+  {
+   "startTime": 0,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Wait",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 5117,
+    "memberIDs": [
+     5117
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": []
+  }
+ ]
+}

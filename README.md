@@ -18,12 +18,17 @@ The visualizer takes three JSON inputs — a **location** (track infrastructure)
 | `run_visualizer.py` | Local web server with a GUI for picking a location/scenario/plan and generating the visualizer HTML |
 | `visualize_plan.py` | CLI tool that renders a scenario + plan into a standalone HTML file |
 | `layout_editor.py` | Browser-based editor for creating/editing track layout files (`layouts/*.json`) |
+| `run_tests.py` | Headless test runner: generates every test pair and runs the animation harnesses in Node |
 | `layouts/` | Track-position JSON files per location, defining x/y coordinates and shapes for the yard diagram |
+| `test_scenarios/` | Hand-crafted test scenarios plus a copy of `location.json`, so they run hermetically |
+| `test_plans/` | Hand-crafted plans matching the test scenarios one-to-one |
+| `tests/js/` | Node harnesses that execute the real `functions.js` headlessly and verify animation invariants |
 | `Images/` | Train unit sprite images (ICR, SLT, SNG, VIRM) and background images |
 
 ## Requirements
 
 - Python 3.10+ (standard library only, no pip dependencies)
+- Node.js (only needed for `run_tests.py`)
 
 ## Usage
 
@@ -51,6 +56,51 @@ python run_visualizer.py --port 8767 --inputs-root ../scenario-planning-inputs
 Open http://127.0.0.1:8767, select a location/scenario/plan from the dropdowns, and click **Generate & View**.
 
 The picker lists each location's `scenarios/` and `plans/` directories, plus the classified corpus under `fixtures/{feasible,infeasible,unresolved}/`, shown as relative paths so you can tell which bucket an entry came from.
+
+A virtual **TestScenarios** location appears whenever `test_scenarios/` exists; it lists the hand-crafted pairs below (scenarios from `test_scenarios/`, plans from `test_plans/`) so they can be viewed like any corpus input.
+
+### Test scenarios
+
+`test_scenarios/` + `test_plans/` contain four small scenario/plan pairs that exercise the visualizer end-to-end with known-good inputs:
+
+| Pair | Covers |
+| --- | --- |
+| `all_parked` | Every parking-allowed track occupied at t=0, including two-member consists and a unit on the 906a arrival stub |
+| `services` | Arrive → move → cleaning/wash/monteur service steps → depart, two trains interleaved |
+| `combine_split` | Two arrivals combined on track 52, moved as a consist, split again, both departed |
+| `full_journey` | Kitchen sink: services, combine, a move to 104a, split, parking on 60/61 and three departs |
+
+They follow real planner conventions (combine = one half-action per member sharing a child SU id; the combined SU carries `parentIDs` in later actions). Open them via the **TestScenarios** location in the web UI, or generate directly:
+
+```
+python visualize_plan.py --location test_scenarios/location.json \
+  --scenario test_scenarios/scenario_test_services.json \
+  --plan test_plans/plan_test_services.json \
+  --layout layouts/kleine_binckhorst.json --output output.html
+```
+
+### Running the tests
+
+```
+python run_tests.py
+```
+
+For every pair (the four above plus two reference pairs from the sibling `scenario-planning-inputs` checkout) it generates the HTML, extracts the embedded data object, and runs the Node harnesses against it:
+
+| Stage | What it verifies |
+| --- | --- |
+| `generate` | `visualize_plan.py` produces an HTML file without errors |
+| `extract` | The embedded `const data = {...}` object parses (tests/js/extract.js) |
+| `harness.js` | For each move state, the first animation frame renders every sprite pixel-identically to the parked rendering: visible (post-clip) centre, angle, width and clip fraction must all match |
+| `midanim.js` | Mid-animation: sprites ride the exact eased arc, rotation follows local tangents with no mirror jumps, width/clip stay frozen, pivots stay on the rails |
+
+Useful flags:
+
+```
+python run_tests.py --list              # show all pairs
+python run_tests.py --only services ref # subset by name substring
+python run_tests.py --keep-temp         # keep generated artifacts for debugging
+```
 
 ### CLI (standalone HTML generation)
 

@@ -72,6 +72,14 @@ def _safe_join(base, relative):
 
 HTML = None
 
+# Virtual location for the repo-local hand-crafted test pairs: scenarios and
+# location.json live in test_scenarios/, plans in test_plans/. The on-disk
+# names are lowercase (the checkout can be case-sensitive); TEST_LOC is just
+# the name shown in the picker.
+TEST_LOC = "TestScenarios"
+TEST_SCEN_DIR = "test_scenarios"
+TEST_PLAN_DIR = "test_plans"
+
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -86,6 +94,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             dirs = sorted(
                 d.name for d in base.iterdir() if d.is_dir() and (d / "location.json").exists()
             ) if base.is_dir() else []
+            # Repo-local test pairs behave like a virtual location, so they can
+            # be picked and viewed exactly like corpus inputs.
+            if (self.server.script_dir / TEST_SCEN_DIR / "location.json").exists():
+                dirs.append(TEST_LOC)
+                dirs.sort()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -95,9 +108,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             from urllib.parse import urlparse, parse_qs
             qs = parse_qs(urlparse(self.path).query)
             loc = (qs.get("location") or [""])[0]
-            base = self.server.inputs_root / loc
-            scenarios = _list_relative(base, ["scenarios/*.json", "fixtures/*/scenario_*.json"])
-            plans = _list_relative(base, ["plans/*.json", "fixtures/*/plan_*.json"])
+            if loc == TEST_LOC:
+                scenarios = _list_relative(
+                    self.server.script_dir / TEST_SCEN_DIR, ["scenario_*.json"])
+                plans = _list_relative(
+                    self.server.script_dir / TEST_PLAN_DIR, ["plan_*.json"])
+            else:
+                base = self.server.inputs_root / loc
+                scenarios = _list_relative(base, ["scenarios/*.json", "fixtures/*/scenario_*.json"])
+                plans = _list_relative(base, ["plans/*.json", "fixtures/*/plan_*.json"])
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -147,14 +166,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             loc_name = data.get("location", "Location_KleineBinckhorst")
             scenario_name = data.get("scenario", "")
             plan_name = data.get("plan", "")
-            location_dir = self.server.inputs_root / loc_name
+            if loc_name == TEST_LOC:
+                location_dir = self.server.script_dir / TEST_SCEN_DIR
+                # Plans for the test pairs live in their own repo folder.
+                plan_base = self.server.script_dir / TEST_PLAN_DIR
+            else:
+                location_dir = self.server.inputs_root / loc_name
+                plan_base = location_dir
             location_path = location_dir / "location.json"
-            # Both names are paths relative to the location directory now, so
+            # Both names are paths relative to their base directory now, so
             # that fixtures/<bucket>/ entries can be selected alongside the
             # scenarios/ and plans/ ones.
             try:
                 scenario_path = _safe_join(location_dir, scenario_name)
-                plan_path = _safe_join(location_dir, plan_name)
+                plan_path = _safe_join(plan_base, plan_name)
             except ValueError as exc:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
