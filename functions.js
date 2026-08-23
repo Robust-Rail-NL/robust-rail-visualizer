@@ -492,6 +492,42 @@ function startMoveAnim(state, prevState) {
       });
     }
   }
+
+  // Arrival anchors: freeze each member's destination-side geometry (chord
+  // pivot, facing, image offset and clip polygon) from the post-move state,
+  // so the final animated frame is pixel-identical to the parked rendering
+  // that replaces it when the move completes.
+  if (_moveUnits.length > 0 && state.trains[train]) {
+    const destInfo = state.trains[train];
+    const destPos = destInfo.track ? positions[destInfo.track] : null;
+    const destShape = destPos && Array.isArray(destPos.shape) && destPos.shape.length >= 2 ? destPos.shape : null;
+    const destSpan = destShape ? trainFractionsOnTrack(train, destInfo.track, state) : null;
+    if (destSpan && destSpan[1] - destSpan[0] > 0.005) {
+      const totalPhys = _moveUnits.reduce((s, x) => s + (x.length || 0), 0);
+      let curF = destSpan[0];
+      _moveUnits.forEach((u, k) => {
+        const s = _moveUnitSpans[k];
+        const natW = TRAIN_H / (u.img ? u.img.aspect : 0.25);
+        const frac = ((u.length || 0) > 0 ? (u.length / totalPhys) : 1 / _moveUnits.length) * (destSpan[1] - destSpan[0]);
+        const nextF = Math.min(destSpan[1], curF + frac);
+        if (s && nextF > curF) {
+          const pts = subPolyline(destShape, curF, nextF);
+          if (pts.length >= 2) {
+            const svgPts = pts.map(p => [toSvgX(p[0]), toSvgY(p[1])]);
+            const L = polylineLength(svgPts);
+            s.imgX1 = L / 2 - natW;
+            s.clipPct1 = Math.max(0, (1 - L / natW) * 100);
+            s.angle1 = segAngle(pts);
+            s.pivot1 = {
+              x: toSvgX((pts[0][0] + pts[pts.length - 1][0]) / 2),
+              y: toSvgY((pts[0][1] + pts[pts.length - 1][1]) / 2),
+            };
+          }
+        }
+        curF = nextF;
+      });
+    }
+  }
   
   // Constant speed: 300 px/s, clamped 300ms - 5000ms
   _moveDuration = Math.max(300, Math.min(5000, (_moveTotalLen / 300) * 1000));
@@ -549,34 +585,44 @@ function _moveDrawFrame(t) {
     _moveUnits.forEach((u, unitIndex) => {
       const s = _moveUnitSpans[unitIndex];
       if (!s || !u.img) return;
-      // Frame 0 reproduces the parked sprite exactly (chord midpoint and
-      // facing), so starting a move never shifts the train; afterwards the
-      // member rides the path tangent at its own position.
+      // Frame 0 reproduces the parked sprite at the origin exactly; frame 1
+      // reproduces the parked sprite at the destination exactly, so starting
+      // or ending a move never shifts the train.  In between, each member
+      // rides the path tangent at its own position.
       const firstFrame = t === 0;
+      const lastFrame = t === 1 && s.pivot1;
       const pm = pointOnPath(_movePath, s.mid + shift);
-      const cx = (firstFrame && s.pivot0) ? s.pivot0.x : toSvgX(pm.x);
-      const cy = (firstFrame && s.pivot0) ? s.pivot0.y : toSvgY(pm.y);
+      const cx = lastFrame ? s.pivot1.x : (firstFrame && s.pivot0) ? s.pivot0.x : toSvgX(pm.x);
+      const cy = lastFrame ? s.pivot1.y : (firstFrame && s.pivot0) ? s.pivot0.y : toSvgY(pm.y);
       // Each member follows the path tangent at its own position. The tangent
       // is unwrapped against the angle rendered in the PREVIOUS frame (parked
       // facing for the first frame), so members turn continuously through
-      // curves and never mirror 180°.
-      let deg = firstFrame ? s.angle : pm.angle;
-      const ref = (s.lastDeg == null) ? s.angle : s.lastDeg;
-      while (deg - ref > 90) deg -= 180;
-      while (deg - ref < -90) deg += 180;
+      // curves and never mirror 180°.  On the final frame the parked facing is
+      // emitted unmodified so it matches the static render bit-for-bit.
+      let deg;
+      if (lastFrame) {
+        deg = s.angle1;
+      } else {
+        deg = firstFrame ? s.angle : pm.angle;
+        const ref = (s.lastDeg == null) ? s.angle : s.lastDeg;
+        while (deg - ref > 90) deg -= 180;
+        while (deg - ref < -90) deg += 180;
+      }
       s.lastDeg = deg;
       const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      const imgX = lastFrame ? s.imgX1 : s.imgX;
+      const clipPct = lastFrame ? s.clipPct1 : s.clipPct;
       el.setAttribute('href', u.img.uri);
       // Parked-style offset: the visible (post-clip) part of the image sits
       // exactly where it does when parked, so the span midpoint doubles as a
       // stable pivot for clipped sprites while they turn.
-      el.setAttribute('x', s.imgX);
+      el.setAttribute('x', imgX);
       el.setAttribute('y', -TRAIN_H);
       el.setAttribute('width', s.natW);
       el.setAttribute('height', TRAIN_H);
       el.setAttribute('transform', `translate(${cx},${cy}) rotate(${deg})`);
-      el.setAttribute('style', s.clipPct > 0
-        ? `pointer-events:none; clip-path: polygon(${s.clipPct}% 0, 100% 0, 100% 100%, ${s.clipPct}% 100%)`
+      el.setAttribute('style', clipPct > 0
+        ? `pointer-events:none; clip-path: polygon(${clipPct}% 0, 100% 0, 100% 100%, ${clipPct}% 100%)`
         : 'pointer-events:none');
       if (train) el.setAttribute('data-train', train);
       el.setAttribute('data-move-anim','1');

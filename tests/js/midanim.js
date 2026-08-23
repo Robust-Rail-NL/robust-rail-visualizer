@@ -83,13 +83,16 @@ for (let i = 1; i < data.states.length; i++) {
     if (Math.hypot(p1.ox - p0.ox, p1.oy - p0.oy) < 5) {
       ok = false; why.push(`m${k} no movement`);
     }
-    // no mirror jumps between sampled frames
-    for (let s2 = 1; s2 < order.length; s2++) {
+    // no mirror jumps between sampled frames; the very last transition is
+    // exempt because arriving normalizes the sprite to its parked facing
+    // (bit-exactness of that landing is pinned by harness.js END checks)
+    for (let s2 = 1; s2 < order.length - 1; s2++) {
       const dAng = Math.abs(wrap180(frames[order[s2]][k].ang - frames[order[s2-1]][k].ang));
       if (dAng > 95) { ok = false; why.push(`m${k} jump @${order[s2]} (${dAng.toFixed(1)}deg)`); }
     }
-    // constant size/clip
-    for (const t of order.slice(1)) {
+    // constant size/clip while riding the path; the final frame may switch
+    // once to the destination-side parked geometry (width/clip/polygon)
+    for (const t of order.slice(1, -1)) {
       if (frames[t][k].w !== frames[0][k].w) { ok = false; why.push(`m${k} w changed @${t}`); }
       if (frames[t][k].clipPct !== frames[0][k].clipPct) { ok = false; why.push(`m${k} clip changed @${t}`); }
     }
@@ -99,10 +102,12 @@ for (let i = 1; i < data.states.length; i++) {
       if (pj.off > 1.5) { ok = false; why.push(`m${k} off rails @${t} (${pj.off.toFixed(2)})`); }
     }
     // clipped sprites: visible slice centred on the pivot; unclipped ones sit
-    // nose-flush like the parked render (offset up to half a sprite length)
-    const limit = frames[0][k].clipPct > 0 ? 1.0 : 80;
+    // nose-flush like the parked render (offset up to half a sprite length).
+    // The limit is per-frame: arriving may swap the sprite to the
+    // destination-side parked geometry (e.g. clipped -> unclipped).
     for (const t of order) {
       const f = frames[t][k];
+      const limit = f.clipPct > 0 ? 1.0 : 80;
       const along = Math.abs((f.vx - f.ox) * Math.cos(f.ang * D2R) + (f.vy - f.oy) * Math.sin(f.ang * D2R));
       if (along > limit) { ok = false; why.push(`m${k} vis-centre off @${t} (${along.toFixed(2)})`); break; }
     }
