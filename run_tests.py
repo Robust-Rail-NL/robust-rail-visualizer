@@ -4,7 +4,8 @@ For every scenario/plan pair below it:
   1. generates the visualizer HTML via visualize_plan.py,
   2. extracts the embedded data object (tests/js/extract.js),
   3. runs the move-animation harnesses (tests/js/harness.js,
-     tests/js/midanim.js) against the extracted data in Node.
+     tests/js/midanim.js) plus the deep-pack parking checker
+     (tests/js/check_pass_through.js) against the extracted data in Node.
 
 Pairs covered:
   * the hand-crafted pairs in test_scenarios/ + test_plans/,
@@ -129,6 +130,7 @@ def check_pair(name, scenario, plan, location, workdir, layout, image):
     if results[-1][1]:
         stage("harness.js", js_harness("harness.js"))
         stage("midanim.js", js_harness("midanim.js"))
+        stage("passthrough", js_harness("check_pass_through.js"))
     return results
 
 

@@ -197,6 +197,7 @@ let _moveUnitSpans = [];
 let _moveSrcTrack = null;
 let _moveSrcSpan = null;
 let _moveSrcRev = false;
+let _moveShifts = [];
 
 function buildMovePath(train, state, prevState, startAtTail) {
   const trackIds = state.train_path && state.train_path[train];
@@ -297,7 +298,17 @@ function buildMovePath(train, state, prevState, startAtTail) {
       const ti = state.trains[t];
       return ti && ti.track === destTrack && t !== train && ti.status !== 'departed' && ti.status !== 'absorbed';
     });
-    if (destTrains.length > 0) {
+    // Primary rule: stop the nose exactly at the mover's own assigned slot
+    // boundary.  With deep-pack parking that span already respects every
+    // standing train (the slot is adjacent to the pack's entry-side bumper),
+    // so this both avoids sweeping through stock and parks flush.
+    const ownFracs = trainFractionsOnTrack(train, destTrack, state);
+    if (ownFracs && ownFracs[1] - ownFracs[0] > 0.005) {
+      frontFrac = destEntrySide === 'b' ? (1 - ownFracs[0]) : ownFracs[1];
+    }
+    if (frontFrac === null && destTrains.length > 0) {
+      // Degenerate own span (over-capacity clamping): fall back to stopping
+      // just short of whichever standing train sits nearest the entry wall.
       let nearFracs = null;
       for (const t of destTrains) {
         const tf = trainFractionsOnTrack(t, destTrack, state);
@@ -311,12 +322,6 @@ function buildMovePath(train, state, prevState, startAtTail) {
       }
       if (nearFracs) {
         frontFrac = destEntrySide === 'b' ? (1 - nearFracs[1]) : nearFracs[0];
-      }
-    }
-    if (frontFrac === null) {
-      const fracs = trainFractionsOnTrack(train, destTrack, state);
-      if (fracs) {
-        frontFrac = destEntrySide === 'b' ? (1 - fracs[0]) : fracs[1];
       }
     }
     if (frontFrac !== null && frontFrac > 0.02 && frontFrac < 0.99) {
@@ -529,6 +534,39 @@ function startMoveAnim(state, prevState) {
     }
   }
   
+  // Bystander slides: with deep-pack parking the standing stock on the source
+  // or destination track can change slots between the two states (e.g. a wall
+  // train departed and the rest compacted deeper).  Animate those re-slides
+  // alongside the mover so nothing teleports between frames.
+  _moveShifts = [];
+  {
+    const involved = {};
+    if (_moveSrcTrack) involved[String(_moveSrcTrack)] = true;
+    const destInfo = state.trains[train];
+    if (destInfo && destInfo.track) involved[String(destInfo.track)] = true;
+    Object.keys(involved).forEach(tid => {
+      Object.keys(state.trains).forEach(b => {
+        if (b === train) return;
+        if (filterTrain && b !== filterTrain && train !== filterTrain) return;
+        const nowInfo = state.trains[b];
+        const prevInfo = prevState ? prevState.trains[b] : null;
+        if (!nowInfo || !nowInfo.track || String(nowInfo.track) !== String(tid)) return;
+        if (!prevInfo || !prevInfo.track || String(prevInfo.track) !== String(tid)) return;
+        if (nowInfo.status === 'departed' || nowInfo.status === 'absorbed') return;
+        const from = trainFractionsOnTrack(b, tid, prevState);
+        const to = trainFractionsOnTrack(b, tid, state);
+        if (!from || !to) return;
+        if (Math.abs(from[0] - to[0]) < 0.0005 && Math.abs(from[1] - to[1]) < 0.0005) return;
+        _moveShifts.push({ train: b, trackId: tid, from: from, to: to });
+      });
+    });
+    _moveShifts.forEach(sh => {
+      document.querySelectorAll('#train-layer [data-train="' + sh.train + '"]').forEach(el => {
+        el.setAttribute('data-move-hidden', '1'); el.style.display = 'none';
+      });
+    });
+  }
+
   // Constant speed: 300 px/s, clamped 300ms - 5000ms
   _moveDuration = Math.max(300, Math.min(5000, (_moveTotalLen / 300) * 1000));
   const trainEls = document.querySelectorAll('#train-layer [data-train="'+train+'"]');
@@ -547,6 +585,7 @@ function cancelMoveAnim() {
   _movePath = null; _moveState = null; _movePrevState = null; _moveUnits = [];
   _moveFrontOff = 0;
   _moveUnitSpans = [];
+  _moveShifts = [];
   _moveSrcTrack = null;
   _moveSrcSpan = null;
   _moveSrcRev = false;
@@ -654,6 +693,18 @@ function _moveDrawFrame(t) {
     el.setAttribute('data-move-anim','1');
     layer.appendChild(el);
   }
+
+  // Bystander slides: draw every re-packing train at its interpolated span,
+  // using the exact parked-draw math so t=0/t=1 frames match the surrounding
+  // static renders pixel-for-pixel.
+  for (let si = 0; si < _moveShifts.length; si++) {
+    const sh = _moveShifts[si];
+    const info = _moveState.trains[sh.train];
+    const f0 = sh.from[0] + (sh.to[0] - sh.from[0]) * easeT;
+    const f1 = sh.from[1] + (sh.to[1] - sh.from[1]) * easeT;
+    if (f1 <= f0) continue;
+    drawTrainOnTrack(sh.trackId, f0, f1, sh.train, !!(info && info.restSide === 'b'), !!(info && info.wasParked), 'shift');
+  }
 }
 
 // ---- PARTICLE IMAGE PROCESSING ----
@@ -706,9 +757,17 @@ function Particle(x, y, vx, vy, size, imgUri, life) {
   this.opacity = 1;
 }
 
-// Compute the fraction range a train occupies on a track (replicates updateYard anchor logic).
-// Stacking is clamped to the parkable straight range when available.
-function trainFractionsOnTrack(train, trackId, state) {
+// Deep-pack parking layout for one track in one state.
+//
+// restSide is the flip of the side a train entered from, so resting against
+// the restSide end means the first train on an empty track parks as far from
+// its entry side as possible.  Every LATER arrival from the same side slots
+// in bumper-to-bumper between the standing pack and its own entry wall, so
+// parking never requires driving past standing stock.  The two anchor groups
+// grow towards each other from opposite ends of the parkable range; when the
+// combined lengths overflow it, the clamps produce overlapping spans which
+// the capacity badges surface honestly.
+function layoutTrack(trackId, state) {
   const pos = positions[trackId];
   const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
   if (!shape) return null;
@@ -721,26 +780,85 @@ function trainFractionsOnTrack(train, trackId, state) {
     if (info && info.track === trackId && info.status !== 'departed' && info.status !== 'absorbed') trainsOnTrack.push(t);
   });
   const to = state.trackOrder || {};
+  let ordered = false;
   if (to[trackId]) {
     const present = to[trackId].filter(t => trainsOnTrack.includes(t));
-    if (present.length === trainsOnTrack.length) { trainsOnTrack.length = 0; present.forEach(t => trainsOnTrack.push(t)); }
+    if (present.length === trainsOnTrack.length) { trainsOnTrack.length = 0; present.forEach(t => trainsOnTrack.push(t)); ordered = true; }
   }
-  const anchorA = [], anchorB = [];
-  trainsOnTrack.forEach(t => {
-    const info = state.trains[t];
-    (info.restSide === 'a' ? anchorA : anchorB).push(t);
-  });
-  let cum = rangeStart;
-  for (const t of anchorA) {
-    const end = Math.min(rangeEnd, cum + trainRatio(t, trackId) * (rangeEnd - rangeStart));
-    if (t === train) return [cum, end];
-    cum = end;
+  const out = [];
+  // 'a'-resting group (entered at the b end): earliest deepest at rangeStart,
+  // later arrivals stacked upward towards the b wall.
+  let cumLo = rangeStart;
+  for (const t of trainsOnTrack) {
+    if (state.trains[t].restSide !== 'a') continue;
+    const w = trainRatio(t, trackId) * (rangeEnd - rangeStart);
+    const f1 = Math.min(rangeEnd, cumLo + w);
+    out.push({ train: t, f0: cumLo, f1: f1 });
+    cumLo = f1;
   }
-  let cumEnd = rangeEnd;
-  for (const t of anchorB) {
-    const start = Math.max(rangeStart, cumEnd - trainRatio(t, trackId) * (rangeEnd - rangeStart));
-    if (t === train) return [start, cumEnd];
-    cumEnd = start;
+  // 'b'-resting group (entered at the a end): earliest deepest at rangeEnd,
+  // later arrivals stacked downward towards the a wall.
+  let cumHi = rangeEnd;
+  for (const t of trainsOnTrack) {
+    if (state.trains[t].restSide === 'a') continue;
+    const w = trainRatio(t, trackId) * (rangeEnd - rangeStart);
+    const f0 = Math.max(rangeStart, cumHi - w);
+    out.push({ train: t, f0: f0, f1: cumHi });
+    cumHi = f0;
+  }
+  // Anti-blockage yield: when the newest lander's slot lies beyond standing
+  // stock that sits between its entry door and that slot, parking would mean
+  // driving straight through the blocker.  Instead the newcomer takes the
+  // pocket flush at its own entry door and every train in the way compacts
+  // deeper (away from the door), preserving relative order.  Keyed on
+  // trackOrder, so the arrangement is deterministic and holds until the next
+  // arrival or departure on this track; the move animation replays the slide
+  // alongside the mover via _moveShifts.
+  if (ordered && out.length >= 2) {
+    const EPS = 0.0005;
+    const newest = trainsOnTrack[trainsOnTrack.length - 1];
+    const spanL = out.find(o => o.train === newest);
+    if (spanL && spanL.f1 - spanL.f0 > EPS) {
+      const doorLow = state.trains[newest].restSide !== 'a';
+      const blocked = out.some(o =>
+        o.train !== newest && (doorLow ? o.f0 < spanL.f0 - EPS : o.f1 > spanL.f1 + EPS));
+      if (blocked) {
+        const wL = spanL.f1 - spanL.f0;
+        if (doorLow) {
+          spanL.f0 = rangeStart;
+          spanL.f1 = Math.min(rangeEnd, rangeStart + wL);
+        } else {
+          spanL.f1 = rangeEnd;
+          spanL.f0 = Math.max(rangeStart, rangeEnd - wL);
+        }
+        const others = out.filter(o => o.train !== newest);
+        others.sort((a, b) => doorLow ? a.f0 - b.f0 : b.f1 - a.f1);
+        let cursor = doorLow ? spanL.f1 : spanL.f0;
+        for (const o of others) {
+          const w = o.f1 - o.f0;
+          if (doorLow) {
+            o.f0 = Math.min(cursor, rangeEnd);
+            o.f1 = Math.min(rangeEnd, o.f0 + w);
+            cursor = o.f1;
+          } else {
+            o.f1 = Math.max(cursor, rangeStart);
+            o.f0 = Math.max(rangeStart, o.f1 - w);
+            cursor = o.f0;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Compute the fraction range a train occupies on a track (replicates updateYard,
+// which consumes layoutTrack directly).
+function trainFractionsOnTrack(train, trackId, state) {
+  const layout = layoutTrack(trackId, state);
+  if (!layout) return null;
+  for (let i = 0; i < layout.length; i++) {
+    if (layout[i].train === train) return [layout[i].f0, layout[i].f1];
   }
   return null;
 }
@@ -1134,7 +1252,7 @@ function trainRatio(train, trackId) {
   return 1;
 }
 
-function drawTrainSegment(trackId, fStart, fEnd, color, width) {
+function drawTrainSegment(trackId, fStart, fEnd, color, width, animTag) {
   const pos = positions[trackId];
   const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
   if (!shape) return;
@@ -1149,6 +1267,10 @@ function drawTrainSegment(trackId, fStart, fEnd, color, width) {
   poly.setAttribute('stroke-linecap','round');
   poly.setAttribute('style','pointer-events:none');
   poly.setAttribute('data-track', trackId);
+  if (animTag) {
+    poly.setAttribute('data-move-anim','1');
+    poly.setAttribute('data-move-shift','1');
+  }
   document.getElementById('train-layer').appendChild(poly);
 }
 
@@ -1171,7 +1293,7 @@ const TRAIN_H = 30;
 // Draw one unit's sprite.  Height is TRAIN_H, width is the natural image width
 // at that height, right-aligned to the segment end.  A band clipPath around the
 // sub-polyline chord slices off the left overflow.
-function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainName) {
+function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainName, animTag) {
   const pos = positions[trackId];
   const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
   const img = data.unitImages ? data.unitImages[typePrefix] : null;
@@ -1200,14 +1322,19 @@ function drawTrainSprite(trackId, fStart, fEnd, typePrefix, flip, parked, trainN
     : 'pointer-events:none');
   if (parked) el.setAttribute('filter','url(#greenTint)');
   if (trainName) el.setAttribute('data-train', trainName);
+  if (animTag) {
+    el.setAttribute('data-move-anim','1');
+    el.setAttribute('data-move-shift','1');
+  }
   document.getElementById('train-layer').appendChild(el);
 }
 
 // Draw a train's colored segment and one sprite per member laid out in name
 // order from the rest anchor.  Each sprite has fixed height TRAIN_H and is
-// clipped to the fraction span.
-function drawTrainOnTrack(trackId, fStart, fEnd, train, restSideB, parked) {
-  drawTrainSegment(trackId, fStart, fEnd, trainColorMap[train]);
+// clipped to the fraction span.  animTag marks the elements as transient
+// move-animation frames (bystander slides) instead of the static render.
+function drawTrainOnTrack(trackId, fStart, fEnd, train, restSideB, parked, animTag) {
+  drawTrainSegment(trackId, fStart, fEnd, trainColorMap[train], undefined, animTag);
   const units = data.trainUnits ? data.trainUnits[train] : null;
   if (!units || !units.length) return;
   let cur = fStart;
@@ -1216,7 +1343,7 @@ function drawTrainOnTrack(trackId, fStart, fEnd, train, restSideB, parked) {
     const next = Math.min(fEnd, cur + span);
     if (next > cur) {
       const img = data.unitImages ? data.unitImages[u.typePrefix] : null;
-      drawTrainSprite(trackId, cur, next, u.typePrefix, !!(img && img.flip), parked, train);
+      drawTrainSprite(trackId, cur, next, u.typePrefix, !!(img && img.flip), parked, train, animTag);
     }
     cur = next;
   });
@@ -1285,8 +1412,9 @@ function updateYard(state, prevState) {
   // Trains on tracks: draw proportional-length segments along track shapes.
   // Every train with a track gets a colored segment + sprite (moving trains are
   // drawn on their current track too, so color is always accompanied by art).
-  // Each train rests flush against its restSide end (a-side or b-side), i.e. it
-  // moved as far as possible away from the side it entered; unknown -> b-side.
+  // Spans come from layoutTrack's deep-pack policy: the earliest train on a
+  // track rests as far from its entry side as possible, later arrivals slot in
+  // nearer the entry wall, so parking moves never sweep through standing stock.
   const groups = {};
   const trackOrder = state.trackOrder || {};
   Object.keys(state.trains).forEach(train => {
@@ -1310,25 +1438,10 @@ function updateYard(state, prevState) {
     const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
     const node = document.getElementById('node-'+trackId.replace(/[^a-zA-Z0-9]/g,'_'));
     if (shape) {
-      const pr = parkableRanges[trackId];
-      const rangeStart = pr ? pr.startFrac : 0;
-      const rangeEnd = pr ? pr.endFrac : 1;
-      const anchorA = [], anchorB = [];
-      groups[trackId].forEach(train => {
-        const info = state.trains[train];
-        (info.restSide === 'a' ? anchorA : anchorB).push(train);
-      });
-      let cum = rangeStart;
-      anchorA.forEach(train => {
-        const end = Math.min(rangeEnd, cum + trainRatio(train, trackId) * (rangeEnd - rangeStart));
-        if (end > cum) drawTrainOnTrack(trackId, cum, end, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked);
-        cum = end;
-      });
-      let cumEnd = rangeEnd;
-      anchorB.forEach(train => {
-        const start = Math.max(rangeStart, cumEnd - trainRatio(train, trackId) * (rangeEnd - rangeStart));
-        if (cumEnd > start) drawTrainOnTrack(trackId, start, cumEnd, train, state.trains[train].restSide === 'b', !!state.trains[train].wasParked);
-        cumEnd = start;
+      const layout = layoutTrack(trackId, state);
+      (layout || []).forEach(item => {
+        const info = state.trains[item.train];
+        if (item.f1 > item.f0) drawTrainOnTrack(trackId, item.f0, item.f1, item.train, info.restSide === 'b', !!info.wasParked);
       });
     } else if (node) {
       groups[trackId].forEach(train => {
@@ -1438,6 +1551,45 @@ function buildRows() {
 }
 
 // ---- TIMELINE ----
+// Physical-plausibility audit of one state, per occupied track:
+//   red   = combined train length exceeds the track itself (impossible)
+//   amber = fits the track but overflows the derived parking zone
+// The solver never sees the parking zone (it is a visualizer-side derivation),
+// so amber marks plan/render disagreement rather than a hard error.
+function trackCapacityViolations(state) {
+  const out = [];
+  const groups = {};
+  Object.keys(state.trains || {}).forEach(t => {
+    const info = state.trains[t];
+    if (!info || !info.track || info.status === 'departed' || info.status === 'absorbed') return;
+    (groups[info.track] = groups[info.track] || []).push(t);
+  });
+  Object.keys(groups).forEach(tid => {
+    const meta = trackMeta[tid];
+    if (!meta || !meta.length) return;
+    const names = groups[tid];
+    let sum = 0;
+    names.forEach(t => { sum += (data.trainLengths && data.trainLengths[t]) || 0; });
+    if (sum > meta.length + 1e-6) {
+      out.push({ level: 'red', track: tid, msg: meta.name + ': ' + names.map(shortName).join(' + ') + ' = ' + Math.round(sum) + ' m on ' + meta.length + ' m track (' + Math.round(100 * sum / meta.length) + '%)' });
+    }
+  });
+  Object.keys(groups).forEach(tid => {
+    if (!positions[tid]) return;
+    if (out.some(v => v.track === tid)) return;
+    const pr = parkableRanges[tid];
+    if (!pr) return;
+    const names = groups[tid];
+    let sumR = 0;
+    names.forEach(t => { sumR += trainRatio(t, tid); });
+    if (sumR > (pr.endFrac - pr.startFrac) + 1e-6) {
+      const meta = trackMeta[tid] || {};
+      out.push({ level: 'amber', track: tid, msg: meta.name + ': ' + names.map(shortName).join(' + ') + ' exceeds the parking zone (' + Math.round(100 * (pr.endFrac - pr.startFrac)) + '% of track)' });
+    }
+  });
+  return out;
+}
+
 function buildTimeline() {
   const tl=document.getElementById('timeline');
   tl.innerHTML='';
@@ -1447,9 +1599,12 @@ function buildTimeline() {
     const atype=state.action_type||'initial';
     const badgeClass = 'badge-'+atype;
     const badgeText = actionLabel(atype);
+    const viols = trackCapacityViolations(state);
+    const worst = viols.some(v => v.level === 'red') ? '#d33' : '#d90';
+    const violHtml = viols.length ? `<span class="t-viol" title="${viols.map(v => v.msg.replace(/"/g,'&quot;')).join('\n')}" style="color:${worst};font-weight:bold;cursor:help">\u26a0</span>` : '';
     item.innerHTML=`
       <div class="t-num">${String(i).padStart(2,'0')}</div>
-      <span class="t-badge ${badgeClass}">${badgeText}</span>
+      <span class="t-badge ${badgeClass}">${badgeText}</span>${violHtml}
       <div class="t-text">${state.train?shortName(state.train)+' \u2014 ':''}${state.raw.replace(/^\d+(\.\.\d+)?:\s*/,'').replace(/\s*[-@\u2192]\s*/g,' \u2192 ')}</div>
     `;
     item.onclick=()=>render(i);

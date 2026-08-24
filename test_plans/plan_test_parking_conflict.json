@@ -1,0 +1,145 @@
+{
+ "schemaVersion": 1,
+ "actions": [
+  {
+   "startTime": 600,
+   "endTime": 600,
+   "taskType": {
+    "predefined": "Arrive",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 8001,
+    "memberIDs": [
+     8101
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": [
+    {
+     "kind": "trackPart",
+     "id": 15
+    }
+   ]
+  },
+  {
+   "startTime": 1500,
+   "endTime": 1500,
+   "taskType": {
+    "predefined": "Arrive",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 8002,
+    "memberIDs": [
+     8102
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": [
+    {
+     "kind": "trackPart",
+     "id": 15
+    }
+   ]
+  },
+  {
+   "startTime": 2100,
+   "endTime": 2100,
+   "taskType": {
+    "predefined": "Arrive",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 8003,
+    "memberIDs": [
+     8103
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": [
+    {
+     "kind": "trackPart",
+     "id": 3
+    }
+   ]
+  },
+  {
+   "startTime": 2700,
+   "endTime": 3000,
+   "taskType": {
+    "predefined": "Move",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 8003,
+    "memberIDs": [
+     8103
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": [
+    {
+     "kind": "trackPart",
+     "id": 56
+    },
+    {
+     "kind": "trackPart",
+     "id": 22
+    },
+    {
+     "kind": "trackPart",
+     "id": 57
+    },
+    {
+     "kind": "trackPart",
+     "id": 23
+    },
+    {
+     "kind": "trackPart",
+     "id": 58
+    },
+    {
+     "kind": "trackPart",
+     "id": 24
+    },
+    {
+     "kind": "trackPart",
+     "id": 59
+    },
+    {
+     "kind": "trackPart",
+     "id": 15
+    }
+   ],
+   "location": 15
+  },
+  {
+   "startTime": 3600,
+   "endTime": 3600,
+   "taskType": {
+    "predefined": "Exit",
+    "other": null
+   },
+   "shuntingUnit": {
+    "id": 8002,
+    "memberIDs": [
+     8102
+    ],
+    "parentIDs": [],
+    "childIDs": []
+   },
+   "resources": [
+    {
+     "kind": "trackPart",
+     "id": 42
+    }
+   ],
+   "location": 15
+  }
+ ]
+}

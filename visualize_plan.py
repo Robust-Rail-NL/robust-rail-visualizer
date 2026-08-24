@@ -390,9 +390,11 @@ def collect_train_units(scenario, states):
 
     The JS lays sprite units along the track starting at the a-side end of the
     train's span, so a consist's member order must match how the members were
-    actually stacked before coupling (earliest lander against the wall, per
-    trackOrder). Ordering by name instead makes the consist appear to swap
-    member positions the moment it forms. Single-name trains are unaffected.
+    actually stacked before coupling.  With deep-pack parking the earliest
+    lander rests deepest against its restSide end: an a-resting group is packed
+    upward from the a end (low fractions = landing order), a b-resting group
+    downward from the b end (low fractions = reverse landing order).
+    Single-name trains are unaffected.
     """
     member_types = member_type_map(scenario)
     if not member_types:

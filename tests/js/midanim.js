@@ -17,8 +17,10 @@ const { T, byId, data } = loadFunctions(dataFile);
 const D2R = Math.PI / 180;
 function wrap180(d) { while (d > 180) d -= 360; while (d < -180) d += 360; return d; }
 
-function snap() {
-  return byId('train-layer').children.filter(e => e.tag === 'image').map(e => {
+function snap(mover) {
+  // Only the mover's own sprites; bystander re-slide frames (deep-pack
+  // shifts) carry other data-train names and are not part of these checks.
+  return byId('train-layer').children.filter(e => e.tag === 'image' && (!mover || e.attrs['data-train'] === mover)).map(e => {
     const m = /translate\(([-\d.e]+),([-\d.e]+)\)\s*rotate\(([-\d.e]+)\)/.exec(e.attrs.transform);
     const c = /polygon\(([\d.e]+)%/.exec(e.attrs.style || '');
     const t = { x: +m[1], y: +m[2], ang: +m[3] };
@@ -65,7 +67,7 @@ for (let i = 1; i < data.states.length; i++) {
   for (const t of order) {
     byId('train-layer').children.length = 0;
     T._moveDrawFrame(t);
-    frames[t] = snap();
+    frames[t] = snap(train);
   }
   const n = frames[0].length;
   if (n === 0) continue;

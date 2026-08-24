@@ -58,6 +58,7 @@ function loadFunctions(dataFile) {
   vm.runInContext(src + `
 ;this.__t = {
   startMoveAnim, _moveDrawFrame, drawTrainOnTrack, trainFractionsOnTrack,
+  layoutTrack, buildMovePath, edgeSideOf, trackCapacityViolations,
   getSpans: () => _moveUnitSpans,
   getUnits: () => _moveUnits,
   getPath: () => _movePath,

@@ -13,8 +13,10 @@ const { T, byId, data } = loadFunctions(dataFile);
 
 function clearLayer() { byId('train-layer').children.length = 0; }
 
-function spritesOf(layer) {
-  return layer.filter(el => el.tag === 'image');
+function spritesOf(layer, train) {
+  // Only the mover's own sprites; bystander re-slide frames (deep-pack
+  // shifts) carry other data-train names and are checked separately.
+  return layer.filter(el => el.tag === 'image' && (!train || el.attrs['data-train'] === train));
 }
 
 function parkedSprites(train, trackId, state) {
@@ -76,7 +78,7 @@ for (let i = 1; i < data.states.length; i++) {
 
   clearLayer();
   T._moveDrawFrame(0);
-  const moving = spritesOf(byId('train-layer').children);
+  const moving = spritesOf(byId('train-layer').children, train);
   const parked = parkedSprites(train, prevState.trains[train].track, prevState);
 
   checked++;
@@ -107,7 +109,7 @@ for (let i = 1; i < data.states.length; i++) {
   if (endInfo && endInfo.track && endInfo.status !== 'departed' && endInfo.status !== 'absorbed') {
     clearLayer();
     T._moveDrawFrame(1);
-    const arriving = spritesOf(byId('train-layer').children);
+    const arriving = spritesOf(byId('train-layer').children, train);
     const parkedEnd = parkedSprites(train, endInfo.track, state);
     let okEnd = parkedEnd.length > 0 && parkedEnd.length === arriving.length;
     if (!okEnd) console.log('FAIL', `state ${i} ${train}: end count mismatch parked=${parkedEnd.length} moving=${arriving.length}`);
