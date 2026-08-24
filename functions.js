@@ -697,6 +697,7 @@ function ensureParticleImages() {
 const particles = [];
 let _particleRaf = null;
 let _serviceSpawn = null;  // trackId, serviceType, state, nextSpawn
+let _particleUnitIdx = 0;  // round-robin cursor over per-unit spawn centers
 
 function Particle(x, y, vx, vy, size, imgUri, life) {
   this.x = x; this.y = y; this.vx = vx; this.vy = vy;
@@ -744,6 +745,66 @@ function trainFractionsOnTrack(train, trackId, state) {
   return null;
 }
 
+// Point at half the arc length of a polyline (raw coordinate pairs).
+// A vertex-index "midpoint" drifts toward whichever side has denser
+// vertices, so emitters must use the true geometric middle instead.
+function polyMidpoint(pts) {
+  if (!pts || pts.length < 2) return null;
+  let total = 0;
+  const segs = [];
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    segs.push(d);
+    total += d;
+  }
+  if (total <= 0) return [pts[0][0], pts[0][1]];
+  const half = total / 2;
+  let acc = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (acc + segs[i] >= half) {
+      const t = segs[i] > 0 ? (half - acc) / segs[i] : 0;
+      return [
+        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t,
+        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t
+      ];
+    }
+    acc += segs[i];
+  }
+  return [pts[pts.length - 1][0], pts[pts.length - 1][1]];
+}
+
+// One emitter point per unit sprite of `train` on trackId: splits the
+// train's fraction span exactly like drawTrainOnTrack (proportional to
+// unit lengths) and returns each unit slice's arc-length midpoint.
+function serviceParticleCenters(trackId, train, state) {
+  const pos = positions[trackId];
+  if (!pos || !pos.shape || pos.shape.length < 2) return [];
+  const fracs = trainFractionsOnTrack(train, trackId, state);
+  if (!fracs || fracs[1] <= fracs[0]) return [];
+  const centers = [];
+  const units = data.trainUnits ? data.trainUnits[train] : null;
+  if (units && units.length) {
+    const total = units.reduce((s, x) => s + (x.length || 0), 0);
+    let cur = fracs[0];
+    units.forEach(u => {
+      const span = (u.length || 0) > 0
+        ? (u.length / (total || units.length)) * (fracs[1] - fracs[0])
+        : (fracs[1] - fracs[0]) / units.length;
+      const next = Math.min(fracs[1], cur + span);
+      if (next > cur) {
+        const mid = polyMidpoint(subPolyline(pos.shape, cur, next));
+        if (mid) centers.push(mid);
+      }
+      cur = next;
+    });
+  }
+  if (!centers.length) {
+    const mid = polyMidpoint(subPolyline(pos.shape, fracs[0], fracs[1]));
+    if (mid) centers.push(mid);
+  }
+  return centers;
+}
+
 function spawnParticles(trackId, serviceType, state) {
   const MAX_PARTICLES = 15;
   if (particles.length >= MAX_PARTICLES) return;
@@ -753,29 +814,26 @@ function spawnParticles(trackId, serviceType, state) {
     ? (data.particleImages.gears || null)
     : (data.particleImages.waterdrop || null);
   if (!imgUri) return;
-  let cx, cy;
-  const fracs = state ? trainFractionsOnTrack(state.train, trackId, state) : null;
-  if (fracs && pos.shape && pos.shape.length >= 2) {
-    const pts = subPolyline(pos.shape, fracs[0], fracs[1]);
-    if (pts.length >= 2) {
-      const mid = pts[Math.floor(pts.length / 2)];
-      cx = toSvgX(mid[0]); cy = toSvgY(mid[1]);
-    } else {
-      cx = toSvgX(pos.x); cy = toSvgY(pos.y);
-    }
-  } else {
-    cx = toSvgX(pos.x); cy = toSvgY(pos.y);
-  }
+  // One cluster per unit sprite, centered on that sprite's own midpoint;
+  // round-robin across spawn ticks so every image keeps its own plume.
+  const centers = serviceParticleCenters(trackId, state && state.train, state)
+    .map(m => [toSvgX(m[0]), toSvgY(m[1])]);
+  if (!centers.length) centers.push([toSvgX(pos.x), toSvgY(pos.y)]);
+  const start = _particleUnitIdx % centers.length;
+  _particleUnitIdx++;
   const isMonteur = serviceType === 'Monteur';
   const batch = Math.min(3, MAX_PARTICLES - particles.length);
+  // Water drops emit 20px above the sprite midpoint; Monteur gears stay put.
+  const liftY = isMonteur ? 0 : -20;
   for (let i = 0; i < batch; i++) {
+    const c = centers[(start + i) % centers.length];
     const ox = (Math.random() - 0.5) * 30;
     const oy = (Math.random() - 0.5) * 15;
     const vx = (Math.random() - 0.5) * 0.3;
     const vy = isMonteur ? -(0.2 + Math.random() * 0.4) : (0.2 + Math.random() * 0.4);
     const size = isMonteur ? 16 + Math.random() * 10 : 14 + Math.random() * 8;
     const life = 1200 + Math.random() * 800;
-    particles.push(new Particle(cx + ox, cy + oy, vx, vy, size, imgUri, life));
+    particles.push(new Particle(c[0] + ox, c[1] + oy + liftY, vx, vy, size, imgUri, life));
   }
 }
 
