@@ -386,22 +386,49 @@ def member_type_map(scenario):
 
 
 def collect_train_units(scenario, states):
-    """Map train name -> list of {typePrefix, length}, in member-name order.
+    """Map train name -> list of {typePrefix, length}, in physical draw order.
 
-    The order matters: the JS lays sprites out along the track from the rest
-    anchor, so the first member sits nearest the wall the train rests against.
+    The JS lays sprite units along the track starting at the a-side end of the
+    train's span, so a consist's member order must match how the members were
+    actually stacked before coupling (earliest lander against the wall, per
+    trackOrder). Ordering by name instead makes the consist appear to swap
+    member positions the moment it forms. Single-name trains are unaffected.
     """
     member_types = member_type_map(scenario)
     if not member_types:
         return {}
     lengths = member_lengths_from_scenario(scenario)
+
+    def consist_draw_order(name):
+        members = str(name).split("+")
+        idx = next((i for i, st in enumerate(states) if name in st.get("trains", {})), None)
+        if idx is None:
+            return members
+        ref = states[idx - 1] if idx > 0 else states[idx]
+        track = None
+        for m in members:
+            info = ref.get("trains", {}).get(m, {})
+            if info.get("track"):
+                track = info["track"]
+                break
+        ordered = None
+        if track is not None:
+            landed = [t for t in (ref.get("trackOrder") or {}).get(track, []) if t in members]
+            if len(landed) == len(members):
+                ordered = landed
+        if ordered is None:
+            return members
+        side = states[idx].get("trains", {}).get(name, {}).get("restSide")
+        return list(reversed(ordered)) if side == "b" else ordered
+
     names = set()
     for state in states:
         names.update(state.get("trains", {}).keys())
     result = {}
     for name in names:
+        parts = consist_draw_order(name) if "+" in str(name) else str(name).split("+")
         units = []
-        for part in str(name).split("+"):
+        for part in parts:
             type_prefix = member_types.get(part)
             if type_prefix:
                 units.append({"typePrefix": type_prefix, "length": lengths.get(part, 0)})

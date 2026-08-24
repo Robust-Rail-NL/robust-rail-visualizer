@@ -1276,39 +1276,55 @@ function updateYard(state, prevState) {
 
   // ---- ANIMATION OVERLAYS ----
   // For combine: draw absorbed members' segments at the combined train's track,
-  // within the combined train's actual fraction range, colored with individual colors.
+  // within the combined train's actual fraction range, colored with individual
+  // colors. Members are laid out physically - the previous state's trackOrder
+  // (wall-first), matching how they were stacked before coupling - not by name,
+  // so the painted colors stay on the rails each unit actually occupies.
   if (state.action_type === 'combine' && state.train && state.train.includes('+')) {
-    const members = state.train.split('+');
+    const allNames = state.train.split('+');
     const trackId = state.trains[state.train] && state.trains[state.train].track;
     if (trackId) {
       const fracs = trainFractionsOnTrack(state.train, trackId, state);
       const pos = positions[trackId];
       const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
       if (fracs && shape) {
+        const prevOrder = prevState && prevState.trackOrder ? prevState.trackOrder[trackId] : null;
+        let members = Array.isArray(prevOrder) ? prevOrder.filter(m => allNames.includes(m)) : [];
+        if (members.length !== allNames.length) members = allNames;
+        const anchorA = !!(state.trains[state.train].restSide === 'a');
         const span = fracs[1] - fracs[0];
         const totalMemberLen = members.reduce((s, m) => s + (data.trainLengths ? (data.trainLengths[m] || 0) : 0), 0);
-        let cum = fracs[0];
+        const placements = [];
+        let cum = anchorA ? fracs[0] : fracs[1];
         members.forEach(m => {
           const mLen = data.trainLengths ? (data.trainLengths[m] || 0) : 0;
           const frac = totalMemberLen > 0 ? (mLen / totalMemberLen) * span : span / members.length;
-          const end = Math.min(fracs[1], cum + frac);
-          if (end > cum) {
-            const color = trainColorMap[m] || '#888';
-            const pts = subPolyline(shape, cum, end);
-            if (pts.length >= 2) {
-              const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-              poly.setAttribute('points', pts.map(p => toSvgX(p[0]) + ',' + toSvgY(p[1])).join(' '));
-              poly.setAttribute('fill', 'none');
-              poly.setAttribute('stroke', color);
-              poly.setAttribute('stroke-width', svgTrackWActive);
-              poly.setAttribute('stroke-linejoin', 'round');
-              poly.setAttribute('stroke-linecap', 'round');
-              poly.setAttribute('style', 'pointer-events:none');
-              poly.setAttribute('data-combine-member', m);
-              document.getElementById('train-layer').appendChild(poly);
-            }
+          if (anchorA) {
+            const end = Math.min(fracs[1], cum + frac);
+            if (end > cum) placements.push([m, cum, end]);
+            cum = end;
+          } else {
+            const start = Math.max(fracs[0], cum - frac);
+            if (cum > start) placements.push([m, start, cum]);
+            cum = start;
           }
-          cum = end;
+        });
+        placements.forEach(pl => {
+          const m = pl[0];
+          const color = trainColorMap[m] || '#888';
+          const pts = subPolyline(shape, pl[1], pl[2]);
+          if (pts.length >= 2) {
+            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            poly.setAttribute('points', pts.map(p => toSvgX(p[0]) + ',' + toSvgY(p[1])).join(' '));
+            poly.setAttribute('fill', 'none');
+            poly.setAttribute('stroke', color);
+            poly.setAttribute('stroke-width', svgTrackWActive);
+            poly.setAttribute('stroke-linejoin', 'round');
+            poly.setAttribute('stroke-linecap', 'round');
+            poly.setAttribute('style', 'pointer-events:none');
+            poly.setAttribute('data-combine-member', m);
+            document.getElementById('train-layer').appendChild(poly);
+          }
         });
       }
     }
