@@ -1194,7 +1194,7 @@ function updateYard(state, prevState) {
   const trainsToShow=filterTrain?[filterTrain]:allTrains;
   trainsToShow.forEach(train => {
     const info=state.trains[train];
-    if(!info||!info.track||(info.status==='departed'&&state.action_type!=='depart')||info.status==='absorbed') return;
+    if(!info||!info.track||(info.status==='departed'&&!(state.action_type==='depart'&&train===state.train))||info.status==='absorbed') return;
     const color=trainColorMap[train];
     if (_movePath && _moveState && _moveState.train === train) return;
     // One continuous polyline for the whole travelled route: buildMovePath already
@@ -1228,9 +1228,9 @@ function updateYard(state, prevState) {
   Object.keys(state.trains).forEach(train => {
     if (filterTrain && train !== filterTrain) return;
     const info = state.trains[train];
-    if (!info || !info.track || (info.status==='departed'&&state.action_type!=='depart') || info.status==='absorbed') return;
+    if (!info || !info.track || (info.status==='departed'&&!(state.action_type==='depart'&&train===state.train)) || info.status==='absorbed') return;
     let renderTrack = info.track;
-    if (info.status==='departed' && state.action_type==='depart' && prevState && prevState.trains[train] && prevState.trains[train].track) {
+    if (info.status==='departed' && train===state.train && state.action_type==='depart' && prevState && prevState.trains[train] && prevState.trains[train].track) {
       renderTrack = prevState.trains[train].track;
     }
     (groups[renderTrack] = groups[renderTrack] || []).push(train);
@@ -1313,30 +1313,33 @@ function updateYard(state, prevState) {
       }
     }
   }
-  // For split: draw parent's segment at the children's track,
-  // colored with the parent's color, so the animation can tween it.
+  // For split: draw each child's final span in the parent's color,
+  // so the animation can tween it toward that child's own color
+  // (exact inverse of the combine overlay above).
   if (state.action_type === 'split' && state.parent_name && state.child_names && state.child_names.length) {
-    const childTrack = state.trains[state.child_names[0]] && state.trains[state.child_names[0]].track;
-    if (childTrack) {
-      const pos = positions[childTrack];
+    const parentColor = trainColorMap[state.parent_name] || '#888';
+    state.child_names.forEach(c => {
+      const trackId = state.trains[c] && state.trains[c].track;
+      if (!trackId) return;
+      const fracs = trainFractionsOnTrack(c, trackId, state);
+      if (!fracs) return;
+      const pos = positions[trackId];
       const shape = pos && Array.isArray(pos.shape) && pos.shape.length >= 2 ? pos.shape : null;
-      const parentColor = trainColorMap[state.parent_name] || '#888';
-      if (shape) {
-        const pts = subPolyline(shape, 0, 1);
-        if (pts.length >= 2) {
-          const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-          poly.setAttribute('points', pts.map(p => toSvgX(p[0]) + ',' + toSvgY(p[1])).join(' '));
-          poly.setAttribute('fill', 'none');
-          poly.setAttribute('stroke', parentColor);
-          poly.setAttribute('stroke-width', svgTrackWActive);
-          poly.setAttribute('stroke-linejoin', 'round');
-          poly.setAttribute('stroke-linecap', 'round');
-          poly.setAttribute('style', 'pointer-events:none');
-          poly.setAttribute('data-split-child', state.parent_name);
-          document.getElementById('train-layer').appendChild(poly);
-        }
+      if (!shape) return;
+      const pts = subPolyline(shape, fracs[0], fracs[1]);
+      if (pts.length >= 2) {
+        const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        poly.setAttribute('points', pts.map(p => toSvgX(p[0]) + ',' + toSvgY(p[1])).join(' '));
+        poly.setAttribute('fill', 'none');
+        poly.setAttribute('stroke', parentColor);
+        poly.setAttribute('stroke-width', svgTrackWActive);
+        poly.setAttribute('stroke-linejoin', 'round');
+        poly.setAttribute('stroke-linecap', 'round');
+        poly.setAttribute('style', 'pointer-events:none');
+        poly.setAttribute('data-split-child', c);
+        document.getElementById('train-layer').appendChild(poly);
       }
-    }
+    });
   }
 }
 
