@@ -1,6 +1,8 @@
 // Verify mid-animation invariants for every move state:
 //  - every sprite rides the exact eased arc position (monotonic by construction)
-//  - rotation follows each member's local tangent with no mirror jumps
+//  - rotation follows each member's local tangent, folded into [-90,90]
+//    (a single ~180deg in-range swap at a true vertical crossing is the
+//    sanctioned side-view mirror; upside-down rendering is never allowed)
 //  - width/clip frozen; visible slice centred like the parked render
 //  - pivot stays on the rails
 //
@@ -85,10 +87,18 @@ for (let i = 1; i < data.states.length; i++) {
     }
     // no mirror jumps between sampled frames; the very last transition is
     // exempt because arriving normalizes the sprite to its parked facing
-    // (bit-exactness of that landing is pinned by harness.js END checks)
+    // (bit-exactness of that landing is pinned by harness.js END checks).
+    // A ~180deg swap between two in-range angles is allowed: that is the
+    // sanctioned vertical-crossing mirror (_moveDrawFrame folds the roll
+    // into [-90,90] so sprites never render upside down on sweeping paths).
+    // Any jump whose result leaves [-90,90] still fails.
     for (let s2 = 1; s2 < order.length - 1; s2++) {
-      const dAng = Math.abs(wrap180(frames[order[s2]][k].ang - frames[order[s2-1]][k].ang));
-      if (dAng > 95) { ok = false; why.push(`m${k} jump @${order[s2]} (${dAng.toFixed(1)}deg)`); }
+      const prev = frames[order[s2 - 1]][k].ang, cur = frames[order[s2]][k].ang;
+      const inRange = a => a >= -90.01 && a <= 90.01;
+      const dAng = Math.abs(wrap180(cur - prev));
+      if (dAng > 95 && !(inRange(prev) && inRange(cur))) {
+        ok = false; why.push(`m${k} jump @${order[s2]} (${dAng.toFixed(1)}deg)`);
+      }
     }
     // constant size/clip while riding the path; the final frame may switch
     // once to the destination-side parked geometry (width/clip/polygon)

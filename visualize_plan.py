@@ -528,6 +528,18 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
                 for m in members:
                     if m in trains:
                         trains[m]["status"] = "absorbed"
+                # Intermediate consists made entirely of this consist's
+                # members (e.g. "6+7" when forming "13+6+7") no longer exist
+                # as separate rolling stock: absorb them too, otherwise they
+                # keep claiming parking space next to the new consist.
+                member_set = set(members)
+                for other in list(trains):
+                    if other == train or "+" not in other:
+                        continue
+                    if trains[other].get("status") == "departed":
+                        continue
+                    if set(other.split("+")) <= member_set:
+                        trains[other]["status"] = "absorbed"
             elif train in trains:
                 trains[train]["status"] = "combined"
             action_type = "combine"

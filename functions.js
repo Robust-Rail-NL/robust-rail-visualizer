@@ -607,6 +607,12 @@ function _moveDrawFrame(t) {
         const ref = (s.lastDeg == null) ? s.angle : s.lastDeg;
         while (deg - ref > 90) deg -= 180;
         while (deg - ref < -90) deg += 180;
+        // Side-view art must never roll past vertical: fold into [-90, 90]
+        // absolutely.  With the reference kept near horizontal, the unwrap
+        // above still absorbs all transitions smoothly; sweeping curves now
+        // mirror at the vertical instead of flipping the sprite upside down.
+        if (deg > 90) deg -= 180;
+        else if (deg < -90) deg += 180;
       }
       s.lastDeg = deg;
       const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
