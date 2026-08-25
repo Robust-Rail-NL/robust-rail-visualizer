@@ -403,9 +403,10 @@ def collect_train_units(scenario, states):
 
     def consist_draw_order(name):
         members = str(name).split("+")
-        idx = next((i for i, st in enumerate(states) if name in st.get("trains", {})), None)
-        if idx is None:
+        all_idx = [i for i, st in enumerate(states) if name in st.get("trains", {})]
+        if not all_idx:
             return members
+        idx = all_idx[-1]
         ref = states[idx - 1] if idx > 0 else states[idx]
         track = None
         for m in members:
@@ -418,9 +419,9 @@ def collect_train_units(scenario, states):
             landed = [t for t in (ref.get("trackOrder") or {}).get(track, []) if t in members]
             if len(landed) == len(members):
                 ordered = landed
+        side = states[idx].get("trains", {}).get(name, {}).get("restSide")
         if ordered is None:
             return members
-        side = states[idx].get("trains", {}).get(name, {}).get("restSide")
         return list(reversed(ordered)) if side == "b" else ordered
 
     names = set()
@@ -561,10 +562,11 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
                 track = combined.get("track")
             track = to_track_id(track, id_to_track, {}) if track else None
             children = step.get("children") or (parent.split("+") if "+" in parent else [parent])
-            for child in children:
+            for ci, child in enumerate(children):
                 trains[child] = {"track": track, "status": "active"}
                 if combined and combined.get("restSide"):
                     trains[child]["restSide"] = combined["restSide"]
+                trains[child]["sort_order"] = len(children) - 1 - ci
             action_type = "split"
             parent_name = parent
             child_names = children
@@ -629,8 +631,8 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
         for train_name, info in state["trains"].items():
             track = info.get("track")
             if track and info.get("status") not in ("departed", "absorbed"):
-                arrivals.setdefault(track, []).append((landing_index(i, train_name), train_name))
-        state["trackOrder"] = {track: [t for _, t in sorted(lst)] for track, lst in arrivals.items()}
+                arrivals.setdefault(track, []).append((landing_index(i, train_name), info.get("sort_order", 0), train_name))
+        state["trackOrder"] = {track: [t for _, _, t in sorted(lst)] for track, lst in arrivals.items()}
 
     return states
 
