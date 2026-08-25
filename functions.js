@@ -1451,6 +1451,24 @@ function updateYard(state, prevState) {
     }
   });
 
+  // layoutTrack() excludes departed trains, so the sprite for the current
+  // depart action was never drawn.  Render it at its previous position
+  // using the prior state's layout so startDepartAnim has something to fade.
+  if (state.action_type === 'depart' && state.train) {
+    const info = state.trains[state.train];
+    const prev = prevState && prevState.trains[state.train];
+    if (info && info.status === 'departed' && prev && prev.track) {
+      const prevLayout = layoutTrack(prev.track, prevState);
+      if (prevLayout) {
+        const span = prevLayout.find(o => o.train === state.train);
+        if (span && span.f1 > span.f0) {
+          drawTrainOnTrack(prev.track, span.f0, span.f1, state.train,
+            info.restSide === 'b', false);
+        }
+      }
+    }
+  }
+
   // ---- ANIMATION OVERLAYS ----
   // For combine: draw absorbed members' segments at the combined train's track,
   // within the combined train's actual fraction range, colored with individual
