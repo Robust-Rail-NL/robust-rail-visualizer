@@ -209,7 +209,7 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     workspace_root = script_dir.parent
-    location_dir = workspace_root / "scenario-planning-inputs" / args.location_name
+    location_dir = workspace_root / "robust-rail-general" / args.location_name
     location_path = location_dir / "location.json"
 
     if args.layout:

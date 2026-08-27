@@ -45,12 +45,12 @@ Options:
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--port` | `8767` | Port to serve on |
-| `--inputs-root` | `../scenario-planning-inputs` | Directory containing `Location_*` folders |
+| `--inputs-root` | `../robust-rail-general` | Directory containing `Location_*` folders |
 | `--output-dir` | `./data` | Where to write generated HTML files |
 | `--host` | `127.0.0.1` | Bind address (use `0.0.0.0` for container/network access) |
 
 ```
-python run_visualizer.py --port 8767 --inputs-root ../scenario-planning-inputs
+python run_visualizer.py --port 8767 --inputs-root ../robust-rail-general
 ```
 
 Open http://127.0.0.1:8767, select a location/scenario/plan from the dropdowns, and click **Generate & View**.
@@ -85,7 +85,7 @@ python visualize_plan.py --location test_scenarios/location.json \
 python run_tests.py
 ```
 
-For every pair (the four above plus two reference pairs from the sibling `scenario-planning-inputs` checkout) it generates the HTML, extracts the embedded data object, and runs the Node harnesses against it:
+For every pair (the four above plus two reference pairs from the sibling `robust-rail-general` checkout) it generates the HTML, extracts the embedded data object, and runs the Node harnesses against it:
 
 | Stage | What it verifies |
 | --- | --- |
@@ -108,9 +108,9 @@ Generate a standalone HTML visualizer directly without the server:
 
 ```
 python visualize_plan.py \
-  --location ../scenario-planning-inputs/Location_KleineBinckhorst/location.json \
-  --scenario ../scenario-planning-inputs/Location_KleineBinckhorst/scenarios/scenario_example.json \
-  --plan ../scenario-planning-inputs/Location_KleineBinckhorst/plans/plan_example.json \
+  --location ../robust-rail-general/Location_KleineBinckhorst/location.json \
+  --scenario ../robust-rail-general/Location_KleineBinckhorst/scenarios/scenario_example.json \
+  --plan ../robust-rail-general/Location_KleineBinckhorst/plans/plan_example.json \
   --layout layouts/kleine_binckhorst.json \
   --output output.html
 ```
@@ -181,7 +181,7 @@ A sequence of actions produced by the planner. Each action has a `path` (sequenc
 The visualizer can also be run via Docker (built from the sibling `planning-approach` repository):
 
 ```
-cd ../scenario-planning-inputs
+cd ../robust-rail-general
 docker run --rm -p 8767:8767 \
   --user $(id -u):$(id -g) \
   --mount type=bind,source=$PWD,target=/app/database \

@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument(
         "--inputs-root", type=Path, default=None,
         help="Directory holding the Location_* folders (default: the sibling "
-             "scenario-planning-inputs checkout).",
+             "robust-rail-general checkout).",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=None,
@@ -235,7 +235,7 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
-    inputs_root = args.inputs_root or repo_root / "scenario-planning-inputs"
+    inputs_root = args.inputs_root or repo_root / "robust-rail-general"
     output_dir = args.output_dir or script_dir / "data"
 
     PORT = args.port

@@ -9,7 +9,7 @@ For every scenario/plan pair below it:
 
 Pairs covered:
   * the hand-crafted pairs in test_scenarios/ + test_plans/,
-  * two reference pairs from the sibling scenario-planning-inputs checkout,
+  * two reference pairs from the sibling robust-rail-general checkout,
     so regressions are caught against real planner output too.
 
 Usage:
@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-INPUTS = SCRIPT_DIR.parent / "scenario-planning-inputs" / "Location_KleineBinckhorst"
+INPUTS = SCRIPT_DIR.parent / "robust-rail-general" / "Location_KleineBinckhorst"
 
 # (name, scenario path, plan path, location.json path)
 REFERENCE_PAIRS = [
