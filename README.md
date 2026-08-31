@@ -197,3 +197,14 @@ The following images in `Images/` are sourced from [Vecteezy](https://www.vectee
 | --- | --- | --- |
 | `gears.jpg` | [Gears Vector Icon](https://nl.vecteezy.com/vector-kunst/552199-versnellingen-vector-icon) | Brian Goff |
 | `waterdrop.jpg` | [Water Drop](https://www.vecteezy.com/vector-art/2297984-water-drop-international-water-power-plant-life-giving-moisture-cartoon-style) | Катерина Антипина |
+
+The train images are sourced from:
+- [DDZ carriage](./Images/ddz_treinstel.PNG) - Source: [Wikipedia](https://nl.wikipedia.org/wiki/Bestand:NS_DDZ_Treinstel.svg)
+- [ICR carriage](./Images/icr_rijtuig_ATP.png) - Source: [Modeltreinexpress](https://www.modeltreinexpress.nl/webshop2/article/3430993/Artitec%2020.158.21)
+- [SLT carriage](./Images/slt_treinstel.png) - Source: [Trainsonmap](https://trainsonmap.com/about)
+- [SNG carriage](./Images/sng_rijtuig_ATP.png) - Source: [Trainsonmap](https://trainsonmap.com/about)
+- [VIRM carriage](./Images/virm_treinstel.png) - Source: [Wikipedia](https://nl.wikipedia.org/wiki/Bestand:NS_VIRM_Treinstel.svg)
+
+The images in `Layouts/` are:
+- [Kleine Binckhorst](./Layouts/kleine_binckhorst.png) in the Netherlands - Source: [Sporenplan](https://www.sporenplan.nl/)
+- [Small location](./Layouts/location.png) - custom-made small location for testing
