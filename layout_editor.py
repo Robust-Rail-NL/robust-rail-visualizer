@@ -13,7 +13,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Layout editor + visualizer launcher."
     )
-    parser.add_argument("--location-name", default="Location_KleineBinckhorst")
+    parser.add_argument("--location-name", default="Location_SimpleService")
     parser.add_argument("--layout", default=None, help="Layout JSON to edit (default: auto-detected)")
     parser.add_argument("--port", type=int, default=8766)
     return parser.parse_args()
