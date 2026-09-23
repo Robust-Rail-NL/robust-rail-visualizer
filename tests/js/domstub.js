@@ -59,6 +59,7 @@ function loadFunctions(dataFile) {
 ;this.__t = {
   startMoveAnim, _moveDrawFrame, drawTrainOnTrack, trainFractionsOnTrack,
   layoutTrack, buildMovePath, edgeSideOf, trackCapacityViolations,
+  parkableRanges,
   getSpans: () => _moveUnitSpans,
   getUnits: () => _moveUnits,
   getPath: () => _movePath,

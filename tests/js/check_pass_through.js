@@ -85,6 +85,32 @@ data.states.forEach((state, i) => {
     }
   });
 
+  // E) arrival rest-side: a train landing from a known entry bumper must rest
+  // on the far side of its entry, so it never parks against its own door.
+  if (state.action_type === 'arrive' && state.arrival_entry && state.train) {
+    const info = state.trains[state.train];
+    if (info && info.track && info.status !== 'departed' && info.status !== 'absorbed') {
+      const via = T.edgeSideOf(String(info.track), String(state.arrival_entry));
+      if (via) {
+        const expectedRest = via === 'a' ? 'b' : 'a';
+        if (info.restSide !== expectedRest) {
+          fail(`state ${i} ${state.train}: arrived on ${String(info.track)} via ${state.arrival_entry} (${via} side) but rests ${info.restSide}, expected ${expectedRest}`);
+        }
+        const fr = T.trainFractionsOnTrack(state.train, String(info.track), state);
+        if (fr && fr[1] - fr[0] > 0.004) {
+          const pr = T.parkableRanges ? T.parkableRanges[String(info.track)] : null;
+          const rangeEnd = pr ? pr.endFrac : 1;
+          const rangeStart = pr ? pr.startFrac : 0;
+          const flush = info.restSide === 'a' ? Math.abs(fr[0] - rangeStart) < EPS
+                                              : Math.abs(fr[1] - rangeEnd) < EPS;
+          if (!flush) {
+            warn(`state ${i} ${state.train}: arrival slot [${fr[0].toFixed(3)},${fr[1].toFixed(3)}] not flush at the ${info.restSide} end (range [${rangeStart.toFixed(3)},${rangeEnd.toFixed(3)}])`);
+          }
+        }
+      }
+    }
+  }
+
   if (state.action_type !== 'move' || !state.train) return;
   const train = state.train;
   const destInfo = state.trains[train];

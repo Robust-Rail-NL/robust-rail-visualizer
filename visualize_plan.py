@@ -220,7 +220,7 @@ def parse_solver_plan(path, id_to_track=None):
         elif task_name == "Move":
             steps.append({"raw": f"{action.get('startTime')}..{action.get('endTime')}: Move {train} \u2192 {display(track)}", "action": "move_to", "args": [train, track], "path": path_raw})
         elif task_name in ("Arrive", "StandIn"):
-            steps.append({"raw": f"{action.get('startTime')}: Arrive {train} @ {display(track)}", "action": "arrive", "args": [train, track], "path": path_raw})
+            steps.append({"raw": f"{action.get('startTime')}: Arrive {train} @ {display(track)}", "action": "arrive", "args": [train, track], "path": path_raw, "entry": action.get("location")})
         elif task_name in ("Exit", "StandOut"):
             # A unit that stays in the yard used to be an Exit carrying
             # standingType="OutStanding"; the schema expresses it as StandOut.
@@ -254,7 +254,7 @@ def entry_side_from_path(raw_path, target, location):
     return None
 
 
-def initial_train_positions(scenario, id_to_track):
+def initial_train_positions(scenario, id_to_track, location=None):
     trains = {}
 
     def member_name(train):
@@ -270,10 +270,15 @@ def initial_train_positions(scenario, id_to_track):
     for train in scenario.get("inStanding", []):
         track_id = train.get("firstParkingTrackPart") or train.get("entryTrackPart")
         if track_id and str(track_id) in id_to_track:
+            entry_part = train.get("entryTrackPart")
+            rest_side = "b"
+            if entry_part is not None and location:
+                entry = entry_side_of(str(track_id), str(entry_part), location)
+                rest_side = {"a": "b", "b": "a"}.get(entry, "b")
             trains[member_name(train)] = {
                 "track": str(track_id),
                 "status": "active",
-                "restSide": "b",
+                "restSide": rest_side,
             }
     return trains
 
@@ -444,12 +449,14 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
     states = [{"index": 0, "action": "initial", "action_type": "initial", "train": None, "raw": "Initial state", "trains": json.loads(json.dumps(initial_trains))}]
     trains = json.loads(json.dumps(initial_trains))
 
-    def land(train, target, status="active"):
+    def land(train, target, status="active", entry_part=None):
         prev_track = trains.get(train, {}).get("track")
         tid = to_track_id(target, id_to_track, {})
         entry = entry_side_from_path(raw_path, tid, location)
         if entry is None and location and prev_track and prev_track != tid:
             entry = entry_side_of(tid, prev_track, location)
+        if entry is None and location and entry_part is not None:
+            entry = entry_side_of(tid, str(entry_part), location)
         trains.setdefault(train, {"track": None, "status": "active"})
         trains[train]["track"] = tid
         trains[train]["status"] = status
@@ -486,7 +493,7 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
             action_type = "move"
         elif action == "arrive" and len(args) >= 2:
             train, target = args[:2]
-            land(train, target, "active")
+            land(train, target, "active", entry_part=step.get("entry"))
             action_type = "arrive"
         elif action == "park" and len(args) >= 2:
             train, track = args[:2]
@@ -600,6 +607,8 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
             "trains": json.loads(json.dumps(trains)),
             "train_path": train_path,
         }
+        if action_type == "arrive" and step.get("entry") is not None:
+            state_entry["arrival_entry"] = str(step["entry"])
         if service_type is not None:
             state_entry["service_type"] = service_type
         if pre_member_tracks is not None:
@@ -1016,7 +1025,7 @@ def main():
     scenario = load_json(args.scenario)
     id_to_track, name_to_track = build_track_maps(location)
     edges = build_edges(location, id_to_track)
-    initial = initial_train_positions(scenario, id_to_track)
+    initial = initial_train_positions(scenario, id_to_track, location)
     steps = parse_plan(args.plan, id_to_track)
     states = simulate_steps(initial, steps, id_to_track, location)
     train_lengths = collect_train_lengths(scenario, args.plan, states)

@@ -28,17 +28,25 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 INPUTS = SCRIPT_DIR.parent / "robust-rail-general" / "Location_KleineBinckhorst"
+SIMPLE_SERVICE_INPUTS = SCRIPT_DIR.parent / "robust-rail-general" / "Location_SimpleService"
 
-# (name, scenario path, plan path, location.json path)
+# (name, scenario path, plan path, location.json path, layout path)
 REFERENCE_PAIRS = [
     ("ref_7t_custom_example1",
-     INPUTS / "scenarios" / "scenario_KleineBinckhorst_7t_custom_example1.json",
-     INPUTS / "plans" / "plan_KleineBinckhorst_7t_custom_example1.json",
-     INPUTS / "location.json"),
+     INPUTS / "scenarios" / "scenario_example1.json",
+     INPUTS / "plans" / "plan_example1.json",
+     INPUTS / "location.json",
+     SCRIPT_DIR / "layouts" / "kleine_binckhorst.json"),
     ("ref_feasible_small",
-     INPUTS / "scenarios" / "scenario_KleineBinckhorst_4t_random_1s_feasible_small.json",
-     INPUTS / "plans" / "plan_KleineBinckhorst_4t_random_1s_feasible_small.json",
-     INPUTS / "location.json"),
+     INPUTS / "scenarios" / "scenario_feasible_small.json",
+     INPUTS / "plans" / "plan_feasible_small.json",
+     INPUTS / "location.json",
+     SCRIPT_DIR / "layouts" / "kleine_binckhorst.json"),
+    ("ref_simple_service_arrival_rest",
+     SIMPLE_SERVICE_INPUTS / "scenarios" / "scenario_full_example.json",
+     SIMPLE_SERVICE_INPUTS / "plans" / "plan_full_example-solver.json",
+     SIMPLE_SERVICE_INPUTS / "location.json",
+     SCRIPT_DIR / "layouts" / "simple_service.json"),
 ]
 
 
@@ -54,16 +62,17 @@ def parse_args():
 
 
 def discover_pairs():
-    """All (name, scenario, plan, location) tuples: crafted pairs first."""
+    """All (name, scenario, plan, location, layout) tuples: crafted pairs first."""
     pairs = []
     scenarios = sorted((SCRIPT_DIR / "test_scenarios").glob("scenario_*.json"))
     plans_dir = SCRIPT_DIR / "test_plans"
+    layout = SCRIPT_DIR / "layouts" / "kleine_binckhorst.json"
     for scenario in scenarios:
         key = scenario.stem.replace("scenario_", "", 1)
         plan = plans_dir / f"plan_{key}.json"
         if plan.exists():
             pairs.append((key.replace("test_", "", 1), scenario, plan,
-                          SCRIPT_DIR / "test_scenarios" / "location.json"))
+                          SCRIPT_DIR / "test_scenarios" / "location.json", layout))
         else:
             print(f"WARNING: no matching plan for {scenario.name}", file=sys.stderr)
     pairs.extend(REFERENCE_PAIRS)
@@ -143,7 +152,7 @@ def main():
 
     pairs = discover_pairs()
     if args.list:
-        for name, scenario, plan, _ in pairs:
+        for name, scenario, plan, _, _ in pairs:
             print(f"{name:<24} {scenario.name} + {plan.name}")
         return 0
     if args.only:
@@ -157,7 +166,6 @@ def main():
         print("ERROR: Node.js is required but was not found on PATH.", file=sys.stderr)
         return 2
 
-    layout = SCRIPT_DIR / "layouts" / "kleine_binckhorst.json"
     image = SCRIPT_DIR / "layouts" / "kleine_binckhorst.png"
     workdir = Path(tempfile.mkdtemp(prefix="rail-tests-", dir=Path(tempfile.gettempdir()) / "opencode"))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +174,7 @@ def main():
     print(f"node: {node}")
     failed = []
     t0 = time.time()
-    for name, scenario, plan, location in pairs:
+    for name, scenario, plan, location, layout in pairs:
         if not scenario.exists() or not plan.exists():
             print(f"\n== {name}\n   MISSING input: {scenario if not scenario.exists() else plan}")
             failed.append(name)
