@@ -411,7 +411,10 @@ def collect_train_units(scenario, states):
         all_idx = [i for i, st in enumerate(states) if name in st.get("trains", {})]
         if not all_idx:
             return members
-        idx = all_idx[-1]
+        # The state where the consist was (last) formed: its members' order
+        # just before that is the physical order of the coupled units.
+        formed = [i for i in all_idx if i == 0 or name not in states[i - 1].get("trains", {})]
+        idx = formed[-1]
         ref = states[idx - 1] if idx > 0 else states[idx]
         track = None
         for m in members:
@@ -629,7 +632,19 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
         track = states[state_index]["trains"][train_name]["track"]
         j = state_index
         while j > 0:
-            prev_track = states[j - 1]["trains"].get(train_name, {}).get("track")
+            prev_trains = states[j - 1]["trains"]
+            # Coupling and splitting happen in place: a new consist keeps
+            # the slot of its members, the children keep their parent's.
+            if train_name not in prev_trains:
+                if states[j].get("action_type") == "combine" and states[j].get("train") == train_name:
+                    members = [m for m in train_name.split("+") if prev_trains.get(m, {}).get("track") == track]
+                    if members:
+                        return min(landing_index(j - 1, m) for m in members)
+                parent = states[j].get("parent_name")
+                if states[j].get("action_type") == "split" and parent in prev_trains and train_name in (states[j].get("child_names") or []):
+                    if prev_trains[parent].get("track") == track:
+                        return landing_index(j - 1, parent)
+            prev_track = prev_trains.get(train_name, {}).get("track")
             if prev_track != track:
                 return j
             # A move that leaves the track and returns to it (e.g. a loop to
