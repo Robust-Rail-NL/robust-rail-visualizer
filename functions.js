@@ -268,6 +268,17 @@ function buildMovePath(train, state, prevState, startAtTail) {
       } else {
         const entrySide = edgeSideOf(tid, allTracks[i-1]);
         pts = (entrySide === 'b') ? shape.slice().reverse() : shape.slice();
+        // A reversal on this track (the path leaves it the way it came in):
+        // run in only as far as the train needs to clear the entry, then back
+        // out over the same ground, instead of driving to the far end and
+        // jumping straight back to the entry switch.
+        if (i + 1 < allTracks.length && allTracks[i + 1] === allTracks[i - 1]) {
+          const depth = Math.min(1, Math.max(0.15, trainRatio(train, tid)));
+          const inward = subPolyline(pts, 0, depth);
+          if (inward.length >= 2) {
+            pts = inward.concat(inward.slice(0, -1).reverse());
+          }
+        }
       }
     }
     if (pts && pts.length >= 2) {

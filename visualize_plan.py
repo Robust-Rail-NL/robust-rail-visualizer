@@ -632,6 +632,11 @@ def simulate_steps(initial_trains, steps, id_to_track, location=None):
             prev_track = states[j - 1]["trains"].get(train_name, {}).get("track")
             if prev_track != track:
                 return j
+            # A move that leaves the track and returns to it (e.g. a loop to
+            # turn the train round) lands it anew, typically at the other
+            # end of the stock already there.
+            if states[j].get("action_type") == "move" and states[j].get("train") == train_name:
+                return j
             j -= 1
         return 0
 
