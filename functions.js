@@ -2,7 +2,23 @@ let current = 0;
 let timer = null;
 let filterTrain = null;
 
-const TRAIN_COLORS = ['#3b82f6','#f59e0b','#ef4444','#10b981','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+const TRAIN_COLORS = [
+  '#3b82f6','#f59e0b','#ef4444','#10b981','#8b5cf6','#ec4899','#06b6d4','#84cc16',
+  '#f97316','#1e3a8a','#c026d3','#14532d','#facc15','#7f1d1d','#0f766e','#92400e',
+];
+
+// Colour for the i-th train. Past the fixed palette, hues are spread by the
+// golden angle so every train still gets its own colour. Always a hex string,
+// because the combine/split tweens parse it with parseHex.
+function trainColorAt(i) {
+  if (i < TRAIN_COLORS.length) return TRAIN_COLORS[i];
+  const h = ((i - TRAIN_COLORS.length) * 137.508 + 20) % 360;
+  const s = 0.7, l = 0.45;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+}
 const allTrains = [...new Set(data.states.flatMap(s => Object.keys(s.trains)))]
   .filter(t => data.states.some(s => s.trains[t] && s.trains[t].track))
   .sort((a, b) => {
@@ -12,7 +28,7 @@ const allTrains = [...new Set(data.states.flatMap(s => Object.keys(s.trains)))]
     return a.localeCompare(b);
   });
 const trainColorMap = {};
-allTrains.forEach((t, i) => { trainColorMap[t] = TRAIN_COLORS[i % TRAIN_COLORS.length]; });
+allTrains.forEach((t, i) => { trainColorMap[t] = trainColorAt(i); });
 
 // ---- COLOR HELPERS ----
 function parseHex(h) {
