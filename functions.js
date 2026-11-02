@@ -734,43 +734,6 @@ function _moveDrawFrame(t) {
   }
 }
 
-// ---- PARTICLE IMAGE PROCESSING ----
-const _processedParticleCache = {};
-function processParticleImage(uri) {
-  if (!uri) return Promise.resolve(uri);
-  if (_processedParticleCache[uri]) return Promise.resolve(_processedParticleCache[uri]);
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const id = ctx.getImageData(0, 0, c.width, c.height);
-      const d = id.data;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] > 230 && d[i+1] > 230 && d[i+2] > 230) d[i+3] = 0;
-      }
-      ctx.putImageData(id, 0, 0);
-      const out = c.toDataURL('image/png');
-      _processedParticleCache[uri] = out;
-      resolve(out);
-    };
-    img.onerror = () => resolve(uri);
-    img.src = uri;
-  });
-}
-let _particlesReady = false;
-function ensureParticleImages() {
-  if (_particlesReady) return Promise.resolve();
-  const uris = data.particleImages || {};
-  const keys = Object.keys(uris);
-  return Promise.all(keys.map(k => processParticleImage(uris[k]))).then(results => {
-    keys.forEach((k, i) => { data.particleImages[k] = results[i]; });
-    _particlesReady = true;
-  });
-}
-
 // ---- PARTICLE SYSTEM ----
 const particles = [];
 let _particleRaf = null;
@@ -782,6 +745,7 @@ function Particle(x, y, vx, vy, size, imgUri, life) {
   this.size = size; this.imgUri = imgUri;
   this.life = life; this.maxLife = life;
   this.opacity = 1;
+  this.el = null;  // lazily created <image>, reused every frame
 }
 
 // Deep-pack parking layout for one track in one state.
@@ -989,21 +953,29 @@ function updateParticles(now) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.life -= 16;
-    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    if (p.life <= 0) {
+      if (p.el) p.el.remove();
+      particles.splice(i, 1);
+      continue;
+    }
     p.x += p.vx; p.y += p.vy;
     p.opacity = Math.min(1, p.life / (p.maxLife * 0.3));
   }
-  layer.innerHTML = '';
+  // Reuse one <image> per particle: recreating them every frame forced the
+  // browser to re-decode the sprite up to 15 times per frame.
   particles.forEach(p => {
-    const el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-    el.setAttribute('href', p.imgUri);
+    let el = p.el;
+    if (!el) {
+      el = p.el = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      el.setAttribute('href', p.imgUri);
+      el.setAttribute('width', p.size);
+      el.setAttribute('height', p.size);
+      el.setAttribute('style', 'pointer-events:none');
+      layer.appendChild(el);
+    }
     el.setAttribute('x', p.x - p.size / 2);
     el.setAttribute('y', p.y - p.size / 2);
-    el.setAttribute('width', p.size);
-    el.setAttribute('height', p.size);
     el.setAttribute('opacity', p.opacity);
-    el.setAttribute('style', 'pointer-events:none');
-    layer.appendChild(el);
   });
 }
 
@@ -1768,11 +1740,9 @@ function render(idx) {
   if (atype === 'service' && state.service_type) {
     const svcTrack = state.trains[state.train] && state.trains[state.train].track;
     if (svcTrack) {
-      ensureParticleImages().then(() => {
-        _serviceSpawn = { trackId: svcTrack, serviceType: state.service_type, state: state, nextSpawn: 0 };
-        spawnParticles(svcTrack, state.service_type, state);
-        if (!_particleRaf) _particleRaf = requestAnimationFrame(_particleLoop);
-      });
+      _serviceSpawn = { trackId: svcTrack, serviceType: state.service_type, state: state, nextSpawn: 0 };
+      spawnParticles(svcTrack, state.service_type, state);
+      if (!_particleRaf) _particleRaf = requestAnimationFrame(_particleLoop);
     }
   }
 

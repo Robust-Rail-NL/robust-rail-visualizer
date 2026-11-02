@@ -737,7 +737,7 @@ def load_unit_images():
     return images
 
 
-PARTICLE_FILES = {"waterdrop": "waterdrop.jpg", "gears": "gears.jpg"}
+PARTICLE_FILES = {"waterdrop": "waterdrop.png", "gears": "gears.png"}
 
 
 def load_particle_images():

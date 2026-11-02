@@ -195,8 +195,8 @@ The following images in `Images/` are sourced from [Vecteezy](https://www.vectee
 
 | File | Source | Artist |
 | --- | --- | --- |
-| `gears.jpg` | [Gears Vector Icon](https://nl.vecteezy.com/vector-kunst/552199-versnellingen-vector-icon) | Brian Goff |
-| `waterdrop.jpg` | [Water Drop](https://www.vecteezy.com/vector-art/2297984-water-drop-international-water-power-plant-life-giving-moisture-cartoon-style) | Катерина Антипина |
+| `gears.png` | [Gears Vector Icon](https://nl.vecteezy.com/vector-kunst/552199-versnellingen-vector-icon) | Brian Goff |
+| `waterdrop.png` | [Water Drop](https://www.vecteezy.com/vector-art/2297984-water-drop-international-water-power-plant-life-giving-moisture-cartoon-style) | Катерина Антипина |
 
 The train images are sourced from:
 - [DDZ carriage](./Images/ddz_treinstel.PNG) - Source: [Wikipedia](https://nl.wikipedia.org/wiki/Bestand:NS_DDZ_Treinstel.svg)
