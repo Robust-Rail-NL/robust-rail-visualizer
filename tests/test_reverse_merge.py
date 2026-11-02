@@ -36,6 +36,21 @@ def test_chain_merges():
     assert not [s for s in steps if s["action"] == "service"]
 
 
+def test_nonzero_reverse_duration_with_interleaved_unit():
+    steps = parse([
+        act("Move", 0, 210, 15, [57, 23, 15]),
+        act("Reverse", 210, 424 + 210, 15),
+        act("Move", 300, 400, 8, [20, 8], su=2),  # other unit moves during the reversal
+        act("Move", 634, 800, 3, [15, 23, 57, 3]),
+    ])
+    mine = [s for s in steps if s["args"][0] == "0"]
+    assert [s["action"] for s in mine] == ["move_to"]
+    assert mine[0]["args"] == ["0", "3"]
+    assert mine[0]["path"] == ["57", "23", "15", "15", "23", "57", "3"]
+    assert mine[0]["raw"].startswith("0..800: Move")
+    assert len([s for s in steps if s["args"][0] == "2"]) == 1
+
+
 def test_double_reverse_merges():
     steps = parse([
         act("Move", 0, 10, 15, [1, 15]),
