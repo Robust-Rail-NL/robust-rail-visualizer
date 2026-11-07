@@ -1737,7 +1737,9 @@ function render(idx) {
   } else if (atype === 'depart') {
     startDepartAnim(state.train);
   }
-  if (atype === 'service' && state.service_type) {
+  // A Reverse that is not folded into a move is shown as a service step, but
+  // the unit only turns around: no gears or water drops.
+  if (atype === 'service' && state.service_type && state.service_type !== 'Reverse') {
     const svcTrack = state.trains[state.train] && state.trains[state.train].track;
     if (svcTrack) {
       _serviceSpawn = { trackId: svcTrack, serviceType: state.service_type, state: state, nextSpawn: 0 };
