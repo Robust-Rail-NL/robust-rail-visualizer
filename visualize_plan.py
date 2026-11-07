@@ -218,7 +218,18 @@ def parse_solver_plan(path, id_to_track=None):
         elif not track:
             continue
         elif task_name == "Move":
-            steps.append({"raw": f"{action.get('startTime')}..{action.get('endTime')}: Move {train} \u2192 {display(track)}", "action": "move_to", "args": [train, track], "path": path_raw})
+            # A Move/Reverse/Move chain is one long move with a reversal in
+            # the middle: fold it into the earlier move_to step.
+            own = [s for s in steps if s["args"] and s["args"][0] == train]
+            if (len(own) >= 2 and own[-1].get("service_type") == "Reverse"
+                    and own[-2]["action"] == "move_to" and own[-2]["args"][1] == own[-1]["args"][1]):
+                steps.remove(own[-1])
+                prev = own[-2]
+                prev["args"] = [train, track]
+                prev["path"] = prev["path"] + path_raw
+                prev["raw"] = f"{prev['start']}..{action.get('endTime')}: Move {train} \u2192 {display(track)}"
+                continue
+            steps.append({"start": action.get("startTime"), "raw": f"{action.get('startTime')}..{action.get('endTime')}: Move {train} \u2192 {display(track)}", "action": "move_to", "args": [train, track], "path": path_raw})
         elif task_name in ("Arrive", "StandIn"):
             steps.append({"raw": f"{action.get('startTime')}: Arrive {train} @ {display(track)}", "action": "arrive", "args": [train, track], "path": path_raw, "entry": action.get("location")})
         elif task_name in ("Exit", "StandOut"):
@@ -726,7 +737,7 @@ def load_unit_images():
     return images
 
 
-PARTICLE_FILES = {"waterdrop": "waterdrop.jpg", "gears": "gears.jpg"}
+PARTICLE_FILES = {"waterdrop": "waterdrop.png", "gears": "gears.png"}
 
 
 def load_particle_images():
